@@ -1,8 +1,11 @@
-from .testing_framework import TestingFramework
-from .test_mytorch_linear import test_linear
-from .test_mytorch_softmax import test_softmax
-from .test_mytorch_scaled_dot_product_attention import test_scaled_dot_product_attention
-from .test_mytorch_multi_head_attention import test_multi_head_attention
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tests.testing_framework import TestingFramework
+from tests.test_mytorch_linear import test_linear
+from tests.test_mytorch_softmax import test_softmax
+from tests.test_mytorch_scaled_dot_product_attention import test_scaled_dot_product_attention
+from tests.test_mytorch_multi_head_attention import test_multi_head_attention
 import json
 
 if __name__ == "__main__":
