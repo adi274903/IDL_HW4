@@ -69,8 +69,7 @@ class LMTrainer(BaseTrainer):
         """
 
         # TODO: In-fill the _train_epoch method
-        # Remove once implemented
-        
+
         # Initialize training variables
         self.model.train()
         batch_bar = tqdm(total=len(dataloader), dynamic_ncols=True, leave=False, position=0, desc=f"[Training LM]")
@@ -393,12 +392,19 @@ class LMTrainer(BaseTrainer):
         with torch.inference_mode():
             if generation_config.get('top_k', 0) > 0 or generation_config.get('top_p', 0) > 0:
                 print("Generating with sampling...")
-                seqs, scores = NotImplementedError, NotImplementedError
-                raise NotImplementedError # Remove if you implemented the sampling method
+                seqs, scores = generator.generate_sample(
+                  prompts,
+                  temperature=generation_config.get('temperature', 1.0),
+                  repeat_penalty=generation_config.get('repeat_penalty', 1.0)
+                )
             elif generation_config.get('beam_width', 1) > 1:
                 print("Generating with beam search...")
-                seqs, scores = NotImplementedError, NotImplementedError
-                raise NotImplementedError # Remove if you implemented the beam search method
+                seqs, scores = generator.generate_beam(
+                    prompts,
+                    beam_width=generation_config.get('beam_width', 5),
+                    temperature=generation_config.get('temperature', 1.0),
+                    repeat_penalty=generation_config.get('repeat_penalty', 1.0)
+                ) # Remove if you implemented the beam search method
                 # Take best beam and score
                 seqs = seqs[:, 0]
                 scores = scores[:, 0]
