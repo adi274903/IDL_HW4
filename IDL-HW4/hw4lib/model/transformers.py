@@ -372,6 +372,8 @@ class EncoderDecoderTransformer(nn.Module):
         # TODO: Project to CTC logits
         ctc_logits = self.ctc_head(x_enc)
 
+        ctc_logits = ctc_logits.transpose(0, 1)
+
         # TODO: Return the encoded representation, padding mask, running attention weights, and CTC inputs (see docstring)
         ctc_inputs = {
         'log_probs': ctc_logits,
