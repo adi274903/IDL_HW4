@@ -69,7 +69,7 @@ class LMDataset(Dataset):
         self.text_files = sorted(os.listdir(self.text_dir))
 
         # TODO: Take subset
-        subset_size = self.config['subset_size']
+        subset_size = config.get('subset_size', 0)
         self.text_files = self.text_files[:subset_size] if subset_size > 0 else self.text_files
 
         # Initialize lists to store transcripts
@@ -130,7 +130,7 @@ class LMDataset(Dataset):
     def __len__(self) -> int:
         """Returns the number of samples in the dataset."""
         # TODO: Implement __len__
-        raise self.length
+        return self.length
 
     def __getitem__(self, idx: int) -> Tuple[torch.LongTensor, torch.LongTensor]:
         """
