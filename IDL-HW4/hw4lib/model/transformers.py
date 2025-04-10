@@ -294,7 +294,7 @@ class EncoderDecoderTransformer(nn.Module):
         self.target_embedding = nn.Embedding(num_classes, d_model)
 
         # TODO: Create the positional encoding layer
-        self.positional_encoding = PositionalEncoding(d_model, max_len, dropout)
+        self.positional_encoding = PositionalEncoding(d_model, max_len)
     
         # TODO: Create the final linear layer
         self.final_linear = nn.Linear(d_model, num_classes)
