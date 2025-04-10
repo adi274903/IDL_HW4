@@ -226,6 +226,9 @@ class SequenceGenerator:
              - scores is of shape (batch_size, beam_width)
         """
         # Add input validation
+
+        raise NotImplementedError
+
         if not torch.is_tensor(x):
             raise TypeError("Input x must be a torch tensor")
         if x.dim() != 2:
