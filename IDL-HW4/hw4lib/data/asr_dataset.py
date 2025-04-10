@@ -189,7 +189,7 @@ class ASRDataset(Dataset):
                 
                 # TODO: Create shifted and golden versions by adding sos and eos tokens   
                 self.transcripts_shifted.append([self.sos_token] + tokenized)
-                self.transcripts_golden.append(tokenized + [self.eos_token]
+                self.transcripts_golden.append(tokenized + [self.eos_token])
 
         # Calculate average characters per token
         # DO NOT MODIFY 
