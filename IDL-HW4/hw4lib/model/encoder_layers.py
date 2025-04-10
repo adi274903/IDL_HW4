@@ -46,9 +46,13 @@ class SelfAttentionEncoderLayer(nn.Module):
         # TODO: Implement __init__
 
         # TODO: Initialize the sublayers      
-        self.self_attn = NotImplementedError # Self-attention layer
-        self.ffn = NotImplementedError # Feed-forward network
-        raise NotImplementedError # Remove once implemented
+        self.self_attn = SelfAttentionLayer(d_model, num_heads, dropout)
+        self.ffn = FeedForwardLayer(d_model, d_ff, dropout)
+
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor, key_padding_mask: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
         '''
@@ -62,10 +66,21 @@ class SelfAttentionEncoderLayer(nn.Module):
             mha_attn_weights (torch.Tensor): The attention weights. shape: (batch_size, seq_len, seq_len)   
         '''
         # TODO: Implement forward: Follow the figure in the writeup
+        norm_x = self.norm1(x)
 
-        # What will be different from decoder self-attention layer?
-        x, mha_attn_weights = NotImplementedError, NotImplementedError
+        attn_output, mha_attn_weights = self.self_attn(norm_x, norm_x, norm_x, key_padding_mask=key_padding_mask)
         
-        # TODO: Return the output tensor and attention weights
-        raise NotImplementedError # Remove once implemented
+        
+        x = x + self.dropout(attn_output)
+        
+        # Feed-forward sublayer with Pre-LN architecture
+        
+        norm_x = self.norm2(x)
+        
+        
+        ffn_output = self.ffn(norm_x)
+        
+        x = x + self.dropout(ffn_output)
+        
+        return x, mha_attn_weights
 
