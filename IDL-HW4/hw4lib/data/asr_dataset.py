@@ -83,9 +83,9 @@ class ASRDataset(Dataset):
 
         # TODO: Get tokenizer ids for special tokens (eos, sos, pad)
         # Hint: See the class members of the H4Tokenizer class
-        self.eos_token = tokenizer.eos_token
-        self.sos_token = tokenizer.sos_token
-        self.pad_token = tokenizer.pad_token
+        self.eos_token = tokenizer.eos_id
+        self.sos_token = tokenizer.sos_id
+        self.pad_token = tokenizer.pad_id
 
         # Set up data paths 
         # TODO: Use root and partition to get the feature directory
