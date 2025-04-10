@@ -88,9 +88,9 @@ class LMTrainer(BaseTrainer):
             targets_shifted = targets_shifted.to(self.device)
             targets_golden = targets_golden.to(self.device)
             lengths = lengths.to(self.device)
-
-
+            
             with torch.autocast(device_type=self.device, dtype=torch.float16):
+
 
                 # TODO: Get raw logits and attention weights from model
                 raw_preds, attn_weights = self.model(targets_shifted, lengths)
@@ -203,7 +203,7 @@ class LMTrainer(BaseTrainer):
             batch_tokens = lengths.sum().item()
             total_tokens += batch_tokens
             running_ce_loss += loss.item() * batch_tokens
-
+            
             # Update the progress bar
             avg_ce_loss = running_ce_loss / total_tokens
             perplexity_token = torch.exp(torch.tensor(avg_ce_loss))
