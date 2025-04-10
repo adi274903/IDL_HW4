@@ -54,7 +54,7 @@ class LMTrainer(BaseTrainer):
         # How would you set the ignore_index? 
         # Use value in config to set the label_smoothing argument
         self.criterion = nn.CrossEntropyLoss(
-          ignore_index=tokenizer.pad_id,
+          ignore_index=self.tokenizer.pad_id,
           label_smoothing=self.config['loss'].get('label_smoothing', 0.0)
         )
 
@@ -82,6 +82,8 @@ class LMTrainer(BaseTrainer):
 
         for i, batch in enumerate(dataloader):
             # TODO: Unpack batch from the dataloader
+            targets_shifted, targets_golden, lengths = batch
+
             # TODO: Move the batch elements to self.device
             targets_shifted = targets_shifted.to(self.device)
             targets_golden = targets_golden.to(self.device)
@@ -179,6 +181,8 @@ class LMTrainer(BaseTrainer):
 
         for i, batch in enumerate(dataloader):
             # TODO: Unpack batch
+            targets_shifted, targets_golden, lengths = batch
+            
             # TODO: Move the batch elements to self.device
             targets_shifted = targets_shifted.to(self.device)
             targets_golden = targets_golden.to(self.device)
@@ -255,7 +259,7 @@ class LMTrainer(BaseTrainer):
             train_metrics, train_attn = self._train_epoch(train_dataloader)
             
             # TODO: Validate
-            val_metrics, val_attn = self._validate_epoch(val_dataloader
+            val_metrics, val_attn = self._validate_epoch(val_dataloader)
 
             # TODO: Generate with the validation set
             gen_results = self.generate(val_dataloader)
