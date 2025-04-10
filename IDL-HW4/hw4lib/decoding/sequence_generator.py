@@ -227,8 +227,6 @@ class SequenceGenerator:
         """
         # Add input validation
 
-        raise NotImplementedError
-
         if not torch.is_tensor(x):
             raise TypeError("Input x must be a torch tensor")
         if x.dim() != 2:

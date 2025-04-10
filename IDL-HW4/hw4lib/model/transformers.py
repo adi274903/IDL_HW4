@@ -352,7 +352,8 @@ class EncoderDecoderTransformer(nn.Module):
         x_enc = self.dropout(x_enc)
 
         # TODO: Create source padding mask on the same device as the input
-        pad_mask_src = PadMask(x_enc_lengths, x_enc.size(1)).to(x_enc.device)
+        pad_mask_src = PadMask(x_enc, x_enc_lengths).to(x_enc.device)
+
         # TODO: Pass through encoder layers and save attention weights
         running_att = {}
         for i in range(self.num_encoder_layers):
@@ -402,7 +403,7 @@ class EncoderDecoderTransformer(nn.Module):
         # TODO: Create target padding mask on the same device as the input
         pad_mask_tgt = None
         if target_lengths is not None:
-          pad_mask_tgt = PadMask(target_lengths, padded_targets.size(1)).to(padded_targets.device)
+          pad_mask_tgt = PadMask(padded_targets, target_lengths).to(padded_targets.device)
 
 
         if pad_mask_tgt is None and self.training:
