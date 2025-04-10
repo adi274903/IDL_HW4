@@ -42,7 +42,7 @@ class SelfAttentionLayer(nn.Module):
         super().__init__()
         # TODO: Implement __init__
         
-        nn.MultiheadAttention(embed_dim=d_model, num_heads=num_heads, dropout=dropout, batch_first=True)
+        self.mha = nn.MultiheadAttention(embed_dim=d_model, num_heads=num_heads, dropout=dropout, batch_first=True)
         
         
         self.norm = nn.LayerNorm(d_model)
