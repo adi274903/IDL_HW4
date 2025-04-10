@@ -83,9 +83,9 @@ class ASRDataset(Dataset):
 
         # TODO: Get tokenizer ids for special tokens (eos, sos, pad)
         # Hint: See the class members of the H4Tokenizer class
-        self.eos_token = tokenizer.eos_id
-        self.sos_token = tokenizer.sos_id
-        self.pad_token = tokenizer.pad_id
+        self.eos_token = self.tokenizer.eos_id
+        self.sos_token = self.tokenizer.sos_id
+        self.pad_token = self.tokenizer.pad_id
 
         # Set up data paths 
         # TODO: Use root and partition to get the feature directory
@@ -148,6 +148,7 @@ class ASRDataset(Dataset):
             # TODO: Truncate features to num_feats set by you in the config
             feat = feat[:self.config['num_feats'], :]
 
+
             # Append to self.feats (num_feats is set by you in the config)
             self.feats.append(feat)
 
@@ -190,6 +191,7 @@ class ASRDataset(Dataset):
                 # TODO: Create shifted and golden versions by adding sos and eos tokens   
                 self.transcripts_shifted.append([self.sos_token] + tokenized)
                 self.transcripts_golden.append(tokenized + [self.eos_token])
+
 
         # Calculate average characters per token
         # DO NOT MODIFY 
