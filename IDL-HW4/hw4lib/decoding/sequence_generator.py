@@ -165,7 +165,46 @@ class SequenceGenerator:
             raise ValueError("max_length must be >= input sequence length")
         
         # TODO: Implement greedy search
-        raise NotImplementedError # Remove once implemented
+        batch_size = x.size(0)
+        sequences = x.clone()
+        scores = torch.zeros(batch_size, device=x.device)
+        finished = torch.zeros(batch_size, dtype=torch.bool, device=x.device)
+        
+
+        
+        for _ in range(self.max_length - x.size(1)):
+        # Check if all sequences have finished
+          if finished.all():
+              break
+          
+        # Get logits from the score function
+          next_token_logits = self.score_fn(sequences)  # (batch_size, vocab_size)
+          
+          # Apply repetition penalty
+          next_token_logits = self._apply_repeat_penalty(next_token_logits, sequences, repeat_penalty)
+          
+          # Apply temperature
+          next_token_logits = next_token_logits / temperature
+          
+          # Get log probabilities
+          log_probs = torch.log_softmax(next_token_logits, dim=-1)
+          
+          # Greedy selection: choose the token with highest probability
+          next_token_scores, next_tokens = torch.max(log_probs, dim=-1)  # (batch_size,)
+          
+          # Update scores only for unfinished sequences
+          scores = torch.where(finished, scores, scores + next_token_scores)
+          
+          # Append next tokens to the sequences
+          next_tokens = next_tokens.unsqueeze(-1)  # (batch_size, 1)
+          sequences = torch.cat([sequences, next_tokens], dim=1)  # (batch_size, seq_len+1)
+          
+          # Check if any sequence has reached EOS
+          is_eos = (next_tokens.squeeze(-1) == self.tokenizer.eos_id)
+          finished = finished | is_eos
+      
+        return sequences, scores
+
 
     def generate_beam(
             self,
@@ -197,7 +236,131 @@ class SequenceGenerator:
             raise ValueError("max_length must be >= input sequence length")
         
         # TODO: Implement beam search
-        raise NotImplementedError # Remove once implemented
+        batch_size = x.size(0)
+        vocab_size = self.tokenizer.vocab_size
+        seq_len = x.size(1)
+
+        sequences = x.unsqueeze(1).repeat(1, beam_width, 1)
+
+        scores = torch.zeros(batch_size, beam_width, device=x.device)
+        
+        finished = torch.zeros(batch_size, beam_width, dtype=torch.bool, device=x.device)
+        for step in range(self.max_length - seq_len):
+        # Check if all beams are finished
+          if finished.all():
+            break
+        
+        # For the first step, we only need to process the original input
+          if step == 0:
+            # Get logits for the first step
+            # Shape: (batch_size, vocab_size)
+            next_token_logits = self.score_fn(x)
+            
+            # Apply repetition penalty
+            next_token_logits = self._apply_repeat_penalty(next_token_logits, x, repeat_penalty)
+            
+            # Apply temperature
+            next_token_logits = next_token_logits / temperature
+            
+            # Get log probabilities
+            # Shape: (batch_size, vocab_size)
+            log_probs = torch.log_softmax(next_token_logits, dim=-1)
+            
+            # Get top-k log probabilities and tokens
+            # Shape: (batch_size, beam_width)
+            beam_scores, beam_tokens = torch.topk(log_probs, beam_width, dim=-1)
+            
+            # Update scores
+            scores = beam_scores
+            
+            # Expand sequences with new tokens
+            # Shape: (batch_size, beam_width, seq_len+1)
+            sequences = torch.cat([
+                sequences,
+                beam_tokens.unsqueeze(-1)
+            ], dim=-1)
+            
+            # Check for EOS tokens
+            # Shape: (batch_size, beam_width)
+            finished = beam_tokens == self.tokenizer.eos_id
+            
+          else:
+            # Reshape sequences for batch processing
+            # Shape: (batch_size * beam_width, current_seq_len)
+            flat_sequences = sequences.view(batch_size * beam_width, -1)
+            
+            # Get logits for all active beams
+            # Shape: (batch_size * beam_width, vocab_size)
+            next_token_logits = self.score_fn(flat_sequences)
+            
+            # Apply repetition penalty
+            next_token_logits = self._apply_repeat_penalty(
+                next_token_logits.view(batch_size, beam_width, vocab_size),
+                sequences,
+                repeat_penalty
+            ).view(batch_size * beam_width, vocab_size)
+            
+            # Apply temperature
+            next_token_logits = next_token_logits / temperature
+            
+            # Get log probabilities
+            # Shape: (batch_size * beam_width, vocab_size)
+            log_probs = torch.log_softmax(next_token_logits, dim=-1)
+            
+            # Reshape log_probs and add beam scores
+            # Shape: (batch_size, beam_width, vocab_size)
+            log_probs = log_probs.view(batch_size, beam_width, vocab_size)
+            
+            # Add previous beam scores to current log probs
+            # Shape: (batch_size, beam_width, vocab_size)
+            log_probs = log_probs + scores.unsqueeze(-1)
+            
+            # For finished beams, set probability of non-EOS tokens to -inf
+            for batch_idx in range(batch_size):
+                for beam_idx in range(beam_width):
+                    if finished[batch_idx, beam_idx]:
+                        log_probs[batch_idx, beam_idx, :] = float('-inf')
+                        log_probs[batch_idx, beam_idx, self.tokenizer.eos_id] = 0.0
+            
+            # Flatten to find top-k across all beams
+            # Shape: (batch_size, beam_width * vocab_size)
+            log_probs_flat = log_probs.view(batch_size, -1)
+            
+            # Get top-k scores and indices
+            # Shape: (batch_size, beam_width)
+            beam_scores, beam_indices = torch.topk(log_probs_flat, beam_width, dim=-1)
+            
+            # Convert flat indices to beam indices and token indices
+            # beam_idx: which beam the token came from
+            # token_idx: which token was selected
+            beam_idx = beam_indices // vocab_size
+            token_idx = beam_indices % vocab_size
+            
+            # Create new sequences
+            new_sequences = torch.zeros(batch_size, beam_width, sequences.size(-1) + 1, 
+                                       dtype=sequences.dtype, device=sequences.device)
+            
+          # Update sequences, scores, and finished flags
+          for batch_idx in range(batch_size):
+                for new_beam_idx in range(beam_width):
+                    old_beam_idx = beam_idx[batch_idx, new_beam_idx]
+                    token = token_idx[batch_idx, new_beam_idx]
+                    
+                    # Copy sequence from old beam and append new token
+                    new_sequences[batch_idx, new_beam_idx, :-1] = sequences[batch_idx, old_beam_idx]
+                    new_sequences[batch_idx, new_beam_idx, -1] = token
+                    
+                    # Update score
+                    scores[batch_idx, new_beam_idx] = beam_scores[batch_idx, new_beam_idx]
+                    
+                    # Update finished flag
+                    finished[batch_idx, new_beam_idx] = token == self.tokenizer.eos_id or finished[batch_idx, old_beam_idx]
+            
+            # Update sequences
+            sequences = new_sequences
+    
+          
+          return sequences, scores
 
     def generate_sample(
             self,
