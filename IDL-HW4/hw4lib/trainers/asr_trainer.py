@@ -222,10 +222,35 @@ class ASRTrainer(BaseTrainer):
             Tuple[Dict[str, float], List[Dict[str, Any]]]: Validation metrics and recognition results
         """
         # TODO: In-fill the _validate_epoch method
-        
+        val_config_params = self.config.get('validation', {})
+        validation_recog_config = {
+            'num_batches': val_config_params.get('num_batches', None), # Ensure this resolves to None for full validation
+            'beam_width': val_config_params.get('beam_width', 5),   # Set beam width (e.g., 10 or from config)
+            'temperature': val_config_params.get('temperature', 1.0),
+            'repeat_penalty': val_config_params.get('repeat_penalty', 1.0),
+            'lm_weight': val_config_params.get('lm_weight', 0.0),
+            'lm_model': None # Add LM loading if needed
+        }
+        # --- Make absolutely sure num_batches is None to run all ---
+        validation_recog_config['num_batches'] = None
 
+        bw = validation_recog_config['beam_width']
+        config_name = f'validation_{"beam_" + str(bw) if bw > 1 else "greedy"}
+        
         # TODO: Call recognize
-        results = self.recognize(dataloader)
+        results = self.recognize(
+            dataloader,
+            recognition_config=validation_recog_config, # Pass the defined config
+            config_name=config_name
+        )
+
+        # --- Extract results and calculate metrics ---
+        try:
+            # Check if results list is empty
+            if not results:
+                 print("Warning: Recognize function returned empty results list.")
+                 return {'word_dist': float('inf'), 'wer': 100.0, 'cer': 100.0}, []
+
         
         # TODO: Extract references and hypotheses from results
         references = [r['target'] for r in results]
