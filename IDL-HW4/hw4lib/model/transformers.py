@@ -279,7 +279,7 @@ class EncoderDecoderTransformer(nn.Module):
         # TODO: Create decoder layers
         # Use ModuleList to create a list of decoder layers
         self.dec_layers = nn.ModuleList([
-          SelfAttentionDecoderLayer(d_model, num_decoder_heads, d_ff_decoder, dropout)
+          CrossAttentionDecoderLayer(d_model, num_decoder_heads, d_ff_decoder, dropout)
           for _ in range(num_decoder_layers)
         ])
         
