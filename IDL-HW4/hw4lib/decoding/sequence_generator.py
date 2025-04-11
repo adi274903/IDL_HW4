@@ -247,7 +247,7 @@ class SequenceGenerator:
         
         finished = torch.zeros(batch_size, beam_width, dtype=torch.bool, device=x.device)
         for step in range(self.max_length - seq_len):
-        # Check if all beams are finished
+        
           if finished.all():
             break
         
@@ -341,16 +341,18 @@ class SequenceGenerator:
             new_sequences = torch.zeros(batch_size, beam_width, sequences.size(-1) + 1, 
                                        dtype=sequences.dtype, device=sequences.device)
             
-          for batch_idx in range(batch_size):
-            # Get indices of sorted scores (descending)
-            sorted_indices = torch.argsort(scores[batch_idx], descending=True)
-            
-            # Sort scores and sequences
-            scores[batch_idx] = scores[batch_idx, sorted_indices]
-            sequences[batch_idx] = sequences[batch_idx, sorted_indices]
-    
-          
-          return sequences, scores
+            final_sequences_list = []
+            final_scores_list = []
+            for batch_idx in range(batch_size):
+                # Get indices that would sort the scores in descending order
+                sorted_indices = torch.argsort(scores[batch_idx], descending=True)
+                # Reorder sequences and scores based on these indices
+                final_sequences_list.append(sequences[batch_idx][sorted_indices])
+                final_scores_list.append(scores[batch_idx][sorted_indices])
+
+            # Stack the sorted lists back into tensors
+            sequences = torch.stack(final_sequences_list)
+            scores = torch.stack(final_scores_list)
 
     def generate_sample(
             self,
