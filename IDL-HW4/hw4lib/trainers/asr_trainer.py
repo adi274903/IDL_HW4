@@ -381,7 +381,7 @@ class ASRTrainer(BaseTrainer):
             # Default config (greedy search)
             recognition_config = {
                 'num_batches': 5,
-                'beam_width': 1,
+                'beam_width': 3,
                 'temperature': 1.0,
                 'repeat_penalty': 1.0,
                 'lm_weight': 0.0,
