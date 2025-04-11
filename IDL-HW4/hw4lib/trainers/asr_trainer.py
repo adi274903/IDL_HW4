@@ -140,8 +140,8 @@ class ASRTrainer(BaseTrainer):
                     targets=targets_golden,           # Golden targets (N, S_target)
                     input_lengths=ctc_input_lengths,  # Use lengths from dict (N,)
                     target_lengths=transcript_lengths # Lengths of golden targets (N,)
-                )
-                loss = ce_loss + self.ctc_weight * ctc_loss
+                    )
+                    loss = ce_loss + self.ctc_weight * ctc_loss
                 else:
                     ctc_loss = torch.tensor(0.0)
                     loss = ce_loss
