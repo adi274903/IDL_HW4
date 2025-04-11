@@ -432,11 +432,11 @@ class EncoderDecoderTransformer(nn.Module):
                 continue
             # TODO: Pass through decoder layer
             x_dec, self_attn, cross_attn = self.dec_layers[i](
-            x_dec, 
-            encoder_output, 
-            key_padding_mask=pad_mask_tgt,
-            attn_mask=causal_mask,
-            dec_key_padding_mask=pad_mask_src
+                x_dec, 
+                encoder_output, 
+                dec_key_padding_mask=pad_mask_tgt,
+                attn_mask=causal_mask,
+                enc_key_padding_mask=pad_mask_src
             )
 
             # TODO: Save attention weights
