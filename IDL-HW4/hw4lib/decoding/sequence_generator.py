@@ -333,7 +333,7 @@ class SequenceGenerator:
             finished_mask = finished.unsqueeze(-1).expand_as(log_probs)
             large_neg = -1e9
             log_probs = torch.where(finished_mask, torch.full_like(log_probs, large_neg), log_probs)
-            log_probs[:, :, self.eos_id] = torch.where(finished, torch.zeros_like(scores), log_probs[:, :, self.eos_id])
+            log_probs[:, :, self.tokenizer.eos_id] = torch.where(finished, torch.zeros_like(scores), log_probs[:, :, self.tokenizer.eos_id])
 
             # --- Calculate Candidate Scores ---
             candidate_scores = scores.unsqueeze(-1) + log_probs
