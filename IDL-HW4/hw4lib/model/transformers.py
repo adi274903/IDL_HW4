@@ -412,7 +412,7 @@ class EncoderDecoderTransformer(nn.Module):
             warnings.warn("pad_mask_tgt is None, unless you are using the decoder as a standalone model or doing inference, you should provide target_lengths")
 
         # TODO: Create causal mask on the same device as the input
-        causal_mask = CausalMask(padded_targets.size(1)).to(padded_targets.device)
+        causal_mask = CausalMask(padded_targets).to(padded_targets.device)
 
         # TODO: Apply the embedding, positional encoding, and dropout
         x_dec = self.target_embedding(padded_targets)
