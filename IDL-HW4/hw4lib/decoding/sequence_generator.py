@@ -289,7 +289,7 @@ class SequenceGenerator:
                  sequences = torch.cat([sequences, tokens.unsqueeze(-1)], dim=-1)
 
                  # Update finished status for the first time
-                 finished = (tokens == self.eos_id) # Shape: (batch_size, beam_width)
+                 finished = (tokens == self.tokenizer.eos_id) # Shape: (batch_size, beam_width)
                  # Continue to next iteration
                  continue # Skip the rest of the loop for step 0
 
