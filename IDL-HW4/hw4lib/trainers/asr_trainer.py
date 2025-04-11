@@ -129,13 +129,19 @@ class ASRTrainer(BaseTrainer):
                 
                 # TODO: Calculate CTC loss if needed
                 if self.ctc_weight > 0:
+                    ctc_log_probs = ctc_inputs['log_probs']
+                    
+                    ctc_input_lengths = ctc_inputs['lengths']
+
+                    ctc_input_lengths = ctc_input_lengths.to(self.device)
+                    
                     ctc_loss = self.ctc_criterion(
-                        ctc_inputs.transpose(0, 1),  # (T, N, C)
-                        targets_golden,
-                        feat_lengths,
-                        transcript_lengths
-                    )
-                    loss = ce_loss + self.ctc_weight * ctc_loss
+                    log_probs=ctc_log_probs,          # Use tensor from dict, NO transpose needed here
+                    targets=targets_golden,           # Golden targets (N, S_target)
+                    input_lengths=ctc_input_lengths,  # Use lengths from dict (N,)
+                    target_lengths=transcript_lengths # Lengths of golden targets (N,)
+                )
+                loss = ce_loss + self.ctc_weight * ctc_loss
                 else:
                     ctc_loss = torch.tensor(0.0)
                     loss = ce_loss
