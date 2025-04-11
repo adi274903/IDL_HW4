@@ -106,11 +106,15 @@ class ASRTrainer(BaseTrainer):
 
         for i, batch in enumerate(dataloader):
             # TODO: Unpack batch and move to device
-            feats = feats.to(self.device)
-            targets_shifted = targets_shifted.to(self.device)
-            targets_golden = targets_golden.to(self.device)
+            padded_features, padded_shifted, padded_golden, feat_lengths, transcript_lengths = batch
+            
+            feats = padded_features.to(self.device)
+            targets_shifted = padded_shifted.to(self.device) 
+            targets_golden = padded_golden.to(self.device)   
             feat_lengths = feat_lengths.to(self.device)
-            transcript_lengths = transcript_lengths.to(self.device)
+
+            if transcript_lengths is not None:
+                transcript_lengths = transcript_lengths.to(self.device)
             
             with torch.autocast(device_type=self.device, dtype=torch.float16):
                 # TODO: get raw predictions and attention weights and ctc inputs from model
@@ -400,11 +404,21 @@ class ASRTrainer(BaseTrainer):
         with torch.inference_mode():
             for i, batch in enumerate(dataloader):
                 # TODO: Unpack batch and move to device
+                if len(batch) == 5:
+                    padded_features, padded_shifted, padded_golden, feat_lengths, transcript_lengths = batch
+                elif len(batch) == 3: # Assuming test might return (feats, None, None, feat_lengths, None) structure adjusted in collate? Or just (feats, feat_lengths)? Check collate_fn output for test set carefully.
+                                      # Let's assume collate_fn returns 5 elements, some are None for test set:
+                     padded_features, _, padded_golden, feat_lengths, _ = batch # Get targets_golden if available, ignore shifted/transcript_lengths for test recognition
+                else:
+                    raise ValueError(f"Unexpected batch format with {len(batch)} elements.")
+      
                 # TODO: Handle both cases where targets may or may not be None (val set v. test set) 
-                feats = feats.to(self.device)
+                feats = padded_features.to(self.device)
                 feat_lengths = feat_lengths.to(self.device)
-                if targets_golden is not None:
-                    targets_golden = targets_golden.to(self.device)
+                if padded_golden is not None:
+                    targets_golden = padded_golden.to(self.device)
+                else:
+                    targets_golden = None
                 
                 # TODO: Encode speech features to hidden states
                 encoder_output, pad_mask_src, _, _ = self.model.encode(feats, feat_lengths)
