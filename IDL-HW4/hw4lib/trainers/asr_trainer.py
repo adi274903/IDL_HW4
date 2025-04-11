@@ -235,7 +235,7 @@ class ASRTrainer(BaseTrainer):
         validation_recog_config['num_batches'] = None
 
         bw = validation_recog_config['beam_width']
-        config_name = f'validation_{"beam_" + str(bw) if bw > 1 else "greedy"}
+        config_name = f'validation_{"beam_" + str(bw) if bw > 1 else "greedy"}'
         
         # TODO: Call recognize
         results = self.recognize(
