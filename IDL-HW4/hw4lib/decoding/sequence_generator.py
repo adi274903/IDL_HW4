@@ -343,8 +343,8 @@ class SequenceGenerator:
             top_scores, top_indices = torch.topk(flat_candidate_scores, beam_width, dim=-1, largest=True, sorted=True)
 
             # --- Determine Origin Beam and Token ID ---
-            beam_idx = (top_indices // self.vocab_size).long()
-            token_idx = (top_indices % self.vocab_size).long()
+            beam_idx = (top_indices // self.tokenizer.vocab_size).long()
+            token_idx = (top_indices % self.tokenizer.vocab_size).long()
 
             # --- Gather Information for New Beams ---
             parent_sequences = torch.gather(sequences, 1, beam_idx.unsqueeze(-1).expand(-1, -1, current_seq_len))
