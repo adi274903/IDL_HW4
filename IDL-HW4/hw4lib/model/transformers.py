@@ -434,9 +434,9 @@ class EncoderDecoderTransformer(nn.Module):
             x_dec, self_attn, cross_attn = self.dec_layers[i](
             x_dec, 
             encoder_output, 
-            dec_key_padding_mask=pad_mask_tgt,
+            key_padding_mask=pad_mask_tgt,
             attn_mask=causal_mask,
-            key_padding_mask_cross=pad_mask_src
+            dec_key_padding_mask=pad_mask_src
             )
 
             # TODO: Save attention weights
