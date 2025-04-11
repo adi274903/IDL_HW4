@@ -353,7 +353,7 @@ class SequenceGenerator:
             # --- Update Beams for Next Iteration ---
             sequences = torch.cat([parent_sequences, token_idx.unsqueeze(-1)], dim=-1)
             scores = top_scores
-            is_eos = (token_idx == self.eos_id)
+            is_eos = (token_idx == self.tokenizer.eos_id)
             finished = parent_finished | is_eos
 
 
