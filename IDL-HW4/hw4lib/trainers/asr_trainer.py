@@ -244,6 +244,7 @@ class ASRTrainer(BaseTrainer):
             config_name=config_name
         )
 
+       
         # --- Extract results and calculate metrics ---
         try:
             # Check if results list is empty
@@ -251,14 +252,34 @@ class ASRTrainer(BaseTrainer):
                  print("Warning: Recognize function returned empty results list.")
                  return {'word_dist': float('inf'), 'wer': 100.0, 'cer': 100.0}, []
 
-        
-        # TODO: Extract references and hypotheses from results
-        references = [r['target'] for r in results]
-        hypotheses = [r['generated'] for r in results]
-        
-        # Calculate metrics on full batch
-        metrics = self._calculate_asr_metrics(references, hypotheses)
-        
+            # Safely extract references and hypotheses
+            references = [r['target'] for r in results if 'target' in r]
+            hypotheses = [r['generated'] for r in results if 'generated' in r]
+
+            if not references:
+                 print("Warning: No targets found in validation results to calculate metrics.")
+                 metrics = {'word_dist': float('inf'), 'wer': 100.0, 'cer': 100.0}
+            elif not hypotheses:
+                 print("Warning: No hypotheses generated in validation.")
+                 metrics = {'word_dist': float('inf'), 'wer': 100.0, 'cer': 100.0}
+            else:
+                 if len(references) != len(hypotheses):
+                      print(f"Warning: Mismatch ref/hyp counts ({len(references)}/{len(hypotheses)}). Truncating.")
+                      min_len = min(len(references), len(hypotheses))
+                      references = references[:min_len]
+                      hypotheses = hypotheses[:min_len]
+
+                 if not references: # Check again after potential truncation
+                      metrics = {'word_dist': float('inf'), 'wer': 100.0, 'cer': 100.0}
+                 else:
+                      metrics = self._calculate_asr_metrics(references, hypotheses)
+
+        except KeyError as e:
+             print(f"Error extracting results: Key missing. Error: {e}")
+             metrics = {'word_dist': float('inf'), 'wer': 100.0, 'cer': 100.0}
+        except Exception as e: # Catch other potential errors
+            print(f"Unexpected error during metric calculation: {e}")
+            metrics = {'word_dist': float('inf'), 'wer': 100.0, 'cer': 100.0}
         return metrics, results
     
     def train(self, train_dataloader, val_dataloader, epochs: int):
