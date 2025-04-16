@@ -87,4 +87,4 @@ wcwidth
 wheel==0.44.0
 zipp
 cloud-tpu-client==0.10
-# libtpu-nightly line removed - will be installed by torch_xla command
+lightning
