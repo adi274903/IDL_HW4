@@ -72,8 +72,8 @@ sympy==1.13.1
 tokenizers==0.21.0
 torch~=2.6.0
 torchaudio~=2.6.0
-torchvision~=2.6.0  # Added: Common PyTorch library, version matched
-torch_xla~=2.6.0    # Added: PyTorch/XLA for TPU support, version matched
+torchvision~=0.21.0  # Corrected: Compatible version for torch 2.6
+torch_xla~=2.6.0    # Kept: PyTorch/XLA matched to torch for TPU
 torchinfo==1.8.0
 torchmetrics==1.6.1
 tornado
