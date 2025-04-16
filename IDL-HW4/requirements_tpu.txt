@@ -72,8 +72,8 @@ sympy==1.13.1
 tokenizers==0.21.0
 torch~=2.6.0
 torchaudio~=2.6.0
-torchvision~=0.21.0  # Corrected: Compatible version for torch 2.6
-torch_xla~=2.6.0    # Kept: PyTorch/XLA matched to torch for TPU
+torchvision~=0.21.0
+torch_xla~=2.6.0
 torchinfo==1.8.0
 torchmetrics==1.6.1
 tornado
@@ -86,5 +86,5 @@ wandb==0.19.2
 wcwidth
 wheel==0.44.0
 zipp
-cloud-tpu-client==0.1.8
-libtpu-nightly==0.1.8.dev20250416
+cloud-tpu-client==0.10           # Changed: Updated to latest available version
+libtpu-nightly==0.1.8.dev20250416 # Kept: Specific nightly build
