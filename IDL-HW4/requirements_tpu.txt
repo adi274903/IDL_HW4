@@ -86,5 +86,5 @@ wandb==0.19.2
 wcwidth
 wheel==0.44.0
 zipp
-cloud-tpu-client==0.10           # Changed: Updated to latest available version
-libtpu-nightly==0.1.8.dev20250416 # Kept: Specific nightly build
+cloud-tpu-client==0.10
+# libtpu-nightly line removed - will be installed by torch_xla command
