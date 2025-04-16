@@ -606,7 +606,7 @@ class ASRTrainerTPU(BaseTrainer):
     
 # -------------------------------------------------------------------------------------------------
 
-class ProgressiveTrainer(ASRTrainer):
+class ProgressiveTrainer(ASRTrainerTPU):
     """
     Progressive Trainer class that implements curriculum learning for ASR training.
 
