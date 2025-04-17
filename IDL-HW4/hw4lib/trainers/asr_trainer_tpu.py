@@ -58,6 +58,10 @@ class ASRTrainer(BaseTrainer):
         super().__init__(model, tokenizer, config, run_name, config_file, device)
 
         # TODO: Implement the __init__ method
+        self.accelerator = Accelerator(
+             mixed_precision="fp16",
+             gradient_accumulation_steps=config['training']['gradient_accumulation_steps']
+        )
         
         # TODO: Initialize CE loss
         # How would you set the ignore_index? 
@@ -111,7 +115,7 @@ class ASRTrainer(BaseTrainer):
             if transcript_lengths is not None:
                 transcript_lengths = transcript_lengths.to(self.device)
             
-            with self.accelerator.autocast()::
+            with self.accelerator.autocast():
                 # TODO: get raw predictions and attention weights and ctc inputs from model
                 seq_out, curr_att, ctc_inputs = self.model(feats, targets_shifted, feat_lengths,transcript_lengths)
                 
@@ -156,8 +160,9 @@ class ASRTrainer(BaseTrainer):
             self.accelerator.backward(loss)
 
             # Only update weights after accumulating enough gradients
-            if self.accelerator.sync_gradients:
-                self.accelerator.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            if (i + 1) % self.config['training']['gradient_accumulation_steps'] == 0:
+                if self.accelerator.sync_gradients:
+                    self.accelerator.clip_grad_norm_(...)
                 self.optimizer.step()
                 self.scheduler.step()
                 self.optimizer.zero_grad()
