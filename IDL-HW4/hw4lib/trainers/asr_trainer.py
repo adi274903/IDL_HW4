@@ -79,10 +79,7 @@ class ASRTrainer(BaseTrainer):
         
         
     def train_step(self, batch):
-        """
-        Process a single batch for Lightning.
-        Returns the computed loss for this batch.
-        """
+        """Process a single training batch and return the loss."""
         padded_features, padded_shifted, padded_golden, feat_lengths, transcript_lengths = batch
 
         feats = padded_features.to(self.device)
@@ -92,11 +89,9 @@ class ASRTrainer(BaseTrainer):
         if transcript_lengths is not None:
             transcript_lengths = transcript_lengths.to(self.device)
 
-        # Forward pass
         seq_out, curr_att, ctc_inputs = self.model(feats, targets_shifted, feat_lengths, transcript_lengths)
         ce_loss = self.ce_criterion(seq_out.view(-1, self.tokenizer.vocab_size), targets_golden.view(-1))
 
-        # CTC loss (if enabled)
         if self.ctc_weight > 0:
             ctc_log_probs = ctc_inputs['log_probs']
             ctc_input_lengths = ctc_inputs['lengths'].to(self.device)
@@ -112,6 +107,38 @@ class ASRTrainer(BaseTrainer):
 
         return loss
 
+    def val_step(self, batch):
+        """Process a single validation batch and return the loss."""
+        # This is nearly identical to train_step, but you may want to disable dropout or other train-only behavior.
+        padded_features, padded_shifted, padded_golden, feat_lengths, transcript_lengths = batch
+
+        feats = padded_features.to(self.device)
+        targets_shifted = padded_shifted.to(self.device)
+        targets_golden = padded_golden.to(self.device)
+        feat_lengths = feat_lengths.to(self.device)
+        if transcript_lengths is not None:
+            transcript_lengths = transcript_lengths.to(self.device)
+
+        self.model.eval()  # Ensure model is in eval mode for validation
+        with torch.no_grad():
+            seq_out, curr_att, ctc_inputs = self.model(feats, targets_shifted, feat_lengths, transcript_lengths)
+            ce_loss = self.ce_criterion(seq_out.view(-1, self.tokenizer.vocab_size), targets_golden.view(-1))
+
+            if self.ctc_weight > 0:
+                ctc_log_probs = ctc_inputs['log_probs']
+                ctc_input_lengths = ctc_inputs['lengths'].to(self.device)
+                ctc_loss = self.ctc_criterion(
+                    log_probs=ctc_log_probs,
+                    targets=targets_golden,
+                    input_lengths=ctc_input_lengths,
+                    target_lengths=transcript_lengths
+                )
+                loss = ce_loss + self.ctc_weight * ctc_loss
+            else:
+                loss = ce_loss
+
+        return loss
+        
     def _train_epoch(self, dataloader):
         """
         Train for one epoch.
