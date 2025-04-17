@@ -141,44 +141,79 @@ class BaseTrainerTPU(ABC):
 
         # Copy config
         shutil.copy2(config_file, expt_root / "config.yaml")
+        
+        model_arch_path = expt_root / "model_arch.txt"
+        summary_device = self.device # Default device for summary
+        original_device = self.device # Store original device
+        is_xla = _XLA_AVAILABLE and ('xla' in str(self.device).lower() or isinstance(self.device, type(xm.xla_device())))
 
-        # Save model architecture with torchinfo summary
-        with open(expt_root / "model_arch.txt", "w") as f:
-            # Get a sample input shape from your model's expected input
-            if isinstance(self.model, DecoderOnlyTransformer):
-                batch_size = self.config['data'].get('batch_size', 8)
-                max_len    = self.model.max_len
-                input_size = [(batch_size, max_len), (batch_size,)]
-                dtypes     = [torch.long, torch.long]
-                # Generate the summary
-                model_summary = summary(
-                    self.model,
-                    input_size=input_size,  # Adjust these dimensions based on your model's input
-                    dtypes=dtypes
-                )
-                # Write the summary string to file
-                f.write(str(model_summary))
-            elif isinstance(self.model, EncoderDecoderTransformer):
-                batch_size = self.config['data'].get('batch_size', 8)
-                max_len = 1000
-                num_feats = self.config['data']['num_feats']
-                input_data = [
-                    torch.randn(batch_size, max_len, num_feats).to(self.device), 
-                    torch.randint(0, self.model.num_classes, (batch_size, max_len//10)).to(self.device), 
-                    torch.randint(max_len//2, max_len, (batch_size,)).to(self.device), 
-                    torch.randint(max_len//20, max_len//10, (batch_size,)).to(self.device)
-                ]
-                dtypes = [torch.float32, torch.long, torch.long, torch.long]
-                # Generate the summary
-                model_summary = summary(
-                    self.model,
-                    input_data=input_data,  # Adjust these dimensions based on your model's input
-                    dtypes=dtypes
-                )
-                # Write the summary string to file
-                f.write(str(model_summary))
-            else:
-                raise NotImplementedError("Model architecture summary not implemented")
+        if is_xla:
+            print("XLA device detected. Moving model temporarily to CPU for torchinfo.summary().")
+            summary_device = torch.device('cpu')
+            self.model.to(summary_device) # Move model to CPU
+
+            print(f"Generating model summary using device: {summary_device}")
+            try:
+                with open(model_arch_path, "w") as f:
+                    # Get a sample input shape/data suitable for the model type
+                    if isinstance(self.model, DecoderOnlyTransformer):
+                        batch_size = self.config['data'].get('batch_size', 8)
+                        max_len    = self.model.max_len
+                        # Input size tuple (dtypes default to float usually, specify if needed)
+                        input_size = [(batch_size, max_len), (batch_size,)]
+                        dtypes     = [torch.long, torch.long] # Dtypes match model expectations
+                        model_summary = summary(
+                            self.model,
+                            input_size=input_size,
+                            dtypes=dtypes,
+                            device=summary_device, # Specify device for summary
+                            verbose=0 # Suppress summary print to stdout, we write to file
+                        )
+                        f.write(str(model_summary))
+    
+                    elif isinstance(self.model, EncoderDecoderTransformer):
+                        batch_size = self.config['data'].get('batch_size', 8)
+                        # Reasonable defaults - adjust if needed based on actual data/config
+                        max_len = self.config.get('max_len', 1000)
+                        num_feats = self.config['data']['num_feats']
+                        dec_len = max_len // 10 # Example decoder length
+    
+                        # Create dummy input data ON THE SUMMARY DEVICE (CPU if XLA)
+                        input_data = [
+                            torch.randn(batch_size, max_len, num_feats, device=summary_device),
+                            torch.randint(0, self.model.num_classes, (batch_size, dec_len), device=summary_device, dtype=torch.long),
+                            torch.randint(max_len//2, max_len + 1, (batch_size,), device=summary_device, dtype=torch.long),
+                            torch.randint(dec_len//2, dec_len + 1, (batch_size,), device=summary_device, dtype=torch.long)
+                        ]
+                        dtypes = [torch.float32, torch.long, torch.long, torch.long] # Match expected dtypes
+                        model_summary = summary(
+                            self.model,
+                            input_data=input_data,
+                            dtypes=dtypes,
+                            device=summary_device, # Specify device for summary
+                            verbose=0 # Suppress summary print to stdout
+                        )
+                        f.write(str(model_summary))
+                    else:
+                        # Handle other model types or raise error
+                        msg = f"Model architecture summary not implemented for type: {type(self.model)}"
+                        print(f"Warning: {msg}")
+                        f.write(msg)
+    
+                print(f"Model summary saved to {model_arch_path}")
+    
+            except Exception as e:
+                # Log error if torchinfo fails
+                error_message = f"torchinfo summary failed on device {summary_device}: {e}\nSaving placeholder."
+                print(f"Warning: {error_message}")
+                with open(model_arch_path, "w") as f:
+                    f.write(error_message)
+    
+            finally:
+                # --- IMPORTANT: Move model back to original device if it was moved ---
+                if is_xla:
+                    print(f"Moving model back to original XLA device: {original_device}")
+                    self.model.to(original_device)
 
         # Create subdirectories
         checkpoint_dir = expt_root / 'checkpoints'
