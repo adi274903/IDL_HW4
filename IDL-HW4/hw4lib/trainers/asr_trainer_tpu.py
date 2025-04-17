@@ -860,7 +860,15 @@ class ProgressiveTrainer(ASRTrainerTPU):
             self.configure_stage(stage_config)
             # Get subset of train_dataloader
             subset_train_dataloader = self.get_subset_dataloader(train_dataloader, stage_config['data_subset'])
+            
+            # Inside progressive_train, after getting subset_loader
+            if isinstance(train_dataloader, pl.MpDeviceLoader):
+                 #print("Original dataloader is MpDeviceLoader, wrapping subset loader...") # Optional: for confirmation
+                 subset_train_dataloader = pl.MpDeviceLoader(subset_train_dataloader, self.device)
+              
             super().train(subset_train_dataloader, val_dataloader, epochs=stage_config['epochs'])
+
+            
 
     def transition_to_full_training(self):
         """Transition from progressive training to full training"""
