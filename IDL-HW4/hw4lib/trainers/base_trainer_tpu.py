@@ -16,7 +16,7 @@ from torchinfo import summary
 from accelerate import Accelerator
 
 
-class BaseTrainer(ABC):
+class BaseTrainerTPU(ABC):
     """
     Base Trainer class that provides common functionality for all trainers.
 
