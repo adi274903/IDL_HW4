@@ -100,7 +100,7 @@ class BaseTrainerTPU(ABC):
         else:
             # GradScaler is typically not used with XLA (handled by xm.optimizer_step) or CPU
             self.scaler = None
-    print(f"GradScaler not initialized for device type: {self.device}") # device might be XLA device object
+            print(f"GradScaler not initialized for device type: {self.device}") # device might be XLA device object
 
         self.use_wandb = config['training'].get('use_wandb', False)
         # Initialize experiment directories
