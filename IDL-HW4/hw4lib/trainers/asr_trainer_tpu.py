@@ -116,7 +116,7 @@ class ASRTrainerTPU(BaseTrainerTPU):
             if transcript_lengths is not None:
                 transcript_lengths = transcript_lengths.to(self.device)
             
-            with torch.autocast(device_type=self.device, dtype=torch.bfloat16):
+            with torch.autocast(device_type='xla', dtype=torch.bfloat16):
                 # TODO: get raw predictions and attention weights and ctc inputs from model
                 seq_out, curr_att, ctc_inputs = self.model(feats, targets_shifted, feat_lengths,transcript_lengths)
                 
