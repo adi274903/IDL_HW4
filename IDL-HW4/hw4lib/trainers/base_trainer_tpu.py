@@ -13,15 +13,10 @@ import shutil
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, Tuple
 from torchinfo import summary
+from accelerate import Accelerator
 
 
-try:
-    import torch_xla.core.xla_model as xm
-    _XLA_AVAILABLE = True
-except ImportError:
-    _XLA_AVAILABLE = False
-
-class BaseTrainerTPU(ABC):
+class BaseTrainer(ABC):
     """
     Base Trainer class that provides common functionality for all trainers.
 
@@ -87,27 +82,16 @@ class BaseTrainerTPU(ABC):
             device: Optional[str] = None
     ):
         # If device is not specified, determine it
-        if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-        
-        print(f"Using device: {device}")
-        self.device = device
-        self.model = model.to(self.device)
+        self.accelerator = Accelerator()
+        self.device = self.accelerator.device  # Get device from Accelerator
+        self.model = model
         self.tokenizer = tokenizer
         self.config = config
         
         # Initialize optimizer and scheduler
         self.optimizer = None  # Should be set by child class
         self.scheduler = None  # Will be set when training starts
-        # Initialize GradScaler only if using CUDA AMP
-        if isinstance(self.device, torch.device) and self.device.type == 'cuda':
-            self.scaler = torch.amp.GradScaler(device=self.device)
-            print("Initialized GradScaler for CUDA.")
-        else:
-            # GradScaler is typically not used with XLA (handled by xm.optimizer_step) or CPU
-            self.scaler = None
-            print(f"GradScaler not initialized for device type: {self.device}") # device might be XLA device object
-
+        
         self.use_wandb = config['training'].get('use_wandb', False)
         # Initialize experiment directories
         self.expt_root, self.checkpoint_dir, self.attn_dir, self.text_dir, \
@@ -147,79 +131,44 @@ class BaseTrainerTPU(ABC):
 
         # Copy config
         shutil.copy2(config_file, expt_root / "config.yaml")
-        
-        model_arch_path = expt_root / "model_arch.txt"
-        summary_device = self.device # Default device for summary
-        original_device = self.device # Store original device
-        is_xla = _XLA_AVAILABLE and ('xla' in str(self.device).lower() or isinstance(self.device, type(xm.xla_device())))
 
-        if is_xla:
-            print("XLA device detected. Moving model temporarily to CPU for torchinfo.summary().")
-            summary_device = torch.device('cpu')
-            self.model.to(summary_device) # Move model to CPU
-
-            print(f"Generating model summary using device: {summary_device}")
-            try:
-                with open(model_arch_path, "w") as f:
-                    # Get a sample input shape/data suitable for the model type
-                    if isinstance(self.model, DecoderOnlyTransformer):
-                        batch_size = self.config['data'].get('batch_size', 8)
-                        max_len    = self.model.max_len
-                        # Input size tuple (dtypes default to float usually, specify if needed)
-                        input_size = [(batch_size, max_len), (batch_size,)]
-                        dtypes     = [torch.long, torch.long] # Dtypes match model expectations
-                        model_summary = summary(
-                            self.model,
-                            input_size=input_size,
-                            dtypes=dtypes,
-                            device=summary_device, # Specify device for summary
-                            verbose=0 # Suppress summary print to stdout, we write to file
-                        )
-                        f.write(str(model_summary))
-    
-                    elif isinstance(self.model, EncoderDecoderTransformer):
-                        batch_size = self.config['data'].get('batch_size', 8)
-                        # Reasonable defaults - adjust if needed based on actual data/config
-                        max_len = self.config.get('max_len', 1000)
-                        num_feats = self.config['data']['num_feats']
-                        dec_len = max_len // 10 # Example decoder length
-    
-                        # Create dummy input data ON THE SUMMARY DEVICE (CPU if XLA)
-                        input_data = [
-                            torch.randn(batch_size, max_len, num_feats, device=summary_device),
-                            torch.randint(0, self.model.num_classes, (batch_size, dec_len), device=summary_device, dtype=torch.long),
-                            torch.randint(max_len//2, max_len + 1, (batch_size,), device=summary_device, dtype=torch.long),
-                            torch.randint(dec_len//2, dec_len + 1, (batch_size,), device=summary_device, dtype=torch.long)
-                        ]
-                        dtypes = [torch.float32, torch.long, torch.long, torch.long] # Match expected dtypes
-                        model_summary = summary(
-                            self.model,
-                            input_data=input_data,
-                            dtypes=dtypes,
-                            device=summary_device, # Specify device for summary
-                            verbose=0 # Suppress summary print to stdout
-                        )
-                        f.write(str(model_summary))
-                    else:
-                        # Handle other model types or raise error
-                        msg = f"Model architecture summary not implemented for type: {type(self.model)}"
-                        print(f"Warning: {msg}")
-                        f.write(msg)
-    
-                print(f"Model summary saved to {model_arch_path}")
-    
-            except Exception as e:
-                # Log error if torchinfo fails
-                error_message = f"torchinfo summary failed on device {summary_device}: {e}\nSaving placeholder."
-                print(f"Warning: {error_message}")
-                with open(model_arch_path, "w") as f:
-                    f.write(error_message)
-    
-            finally:
-                # --- IMPORTANT: Move model back to original device if it was moved ---
-                if is_xla:
-                    print(f"Moving model back to original XLA device: {original_device}")
-                    self.model.to(original_device)
+        # Save model architecture with torchinfo summary
+        with open(expt_root / "model_arch.txt", "w") as f:
+            # Get a sample input shape from your model's expected input
+            if isinstance(self.model, DecoderOnlyTransformer):
+                batch_size = self.config['data'].get('batch_size', 8)
+                max_len    = self.model.max_len
+                input_size = [(batch_size, max_len), (batch_size,)]
+                dtypes     = [torch.long, torch.long]
+                # Generate the summary
+                model_summary = summary(
+                    self.model,
+                    input_size=input_size,  # Adjust these dimensions based on your model's input
+                    dtypes=dtypes
+                )
+                # Write the summary string to file
+                f.write(str(model_summary))
+            elif isinstance(self.model, EncoderDecoderTransformer):
+                batch_size = self.config['data'].get('batch_size', 8)
+                max_len = 1000
+                num_feats = self.config['data']['num_feats']
+                input_data = [
+                    torch.randn(batch_size, max_len, num_feats).to(self.device), 
+                    torch.randint(0, self.model.num_classes, (batch_size, max_len//10)).to(self.device), 
+                    torch.randint(max_len//2, max_len, (batch_size,)).to(self.device), 
+                    torch.randint(max_len//20, max_len//10, (batch_size,)).to(self.device)
+                ]
+                dtypes = [torch.float32, torch.long, torch.long, torch.long]
+                # Generate the summary
+                model_summary = summary(
+                    self.model,
+                    input_data=input_data,  # Adjust these dimensions based on your model's input
+                    dtypes=dtypes
+                )
+                # Write the summary string to file
+                f.write(str(model_summary))
+            else:
+                raise NotImplementedError("Model architecture summary not implemented")
 
         # Create subdirectories
         checkpoint_dir = expt_root / 'checkpoints'
@@ -255,47 +204,56 @@ class BaseTrainerTPU(ABC):
         return expt_root, checkpoint_dir, attn_dir, text_dir, best_model_path, last_model_path
 
     def _log_metrics(self, metrics: Dict[str, Dict[str, float]], step: int):
-        """Generic metric logging method."""
-        self.training_history.append({
-            'epoch': step,
-            **metrics,
-            'lr': self.optimizer.param_groups[0]['lr']
-        })
-        
-        # Log to wandb
-        if self.use_wandb:
-            wandb_metrics = {}
-            for split, split_metrics in metrics.items():
-                for metric_name, value in split_metrics.items():
-                    wandb_metrics[f'{split}/{metric_name}'] = value
-            wandb_metrics['learning_rate'] = self.optimizer.param_groups[0]['lr']
-            wandb.log(wandb_metrics, step=step)
-        
-        # Print metrics with tree structure
-        print(f"\n📊 Metrics (Epoch {step}):")
-        
-        # Print metrics by split
-        splits = sorted(metrics.keys())
-        for i, split in enumerate(splits):
-            is_last_split = i == len(splits) - 1
-            split_prefix = "└──" if is_last_split else "├──"
-            print(f"{split_prefix} {split.upper()}:")
+        """Generic metric logging method (Accelerate-compatible)."""
+        # Gather and reduce metrics across processes
+        gathered_metrics = {}
+        for split, split_metrics in metrics.items():
+            gathered_metrics[split] = {
+                k: self.accelerator.gather(v).mean() 
+                if isinstance(v, torch.Tensor) 
+                else torch.tensor(v).to(self.accelerator.device)
+                for k, v in split_metrics.items()
+            }
+    
+        # Sync across devices
+        self.accelerator.wait_for_everyone()
+    
+        # Only log from main process
+        if self.accelerator.is_main_process:
+            # Update training history
+            self.training_history.append({
+                'epoch': step,
+                **{k: {mk: mv.item() for mk, mv in v.items()} for k, v in gathered_metrics.items()},
+                'lr': self.optimizer.param_groups[0]['lr']
+            })
             
-            # Print metrics within split
-            split_metrics = sorted(metrics[split].items())
-            for j, (metric_name, value) in enumerate(split_metrics):
-                is_last_metric = j == len(split_metrics) - 1
-                metric_prefix = "    └──" if is_last_metric else "    ├──"
-                if is_last_split:
+            # WandB logging
+            if self.use_wandb:
+                wandb_metrics = {}
+                for split, split_metrics in gathered_metrics.items():
+                    for metric_name, value in split_metrics.items():
+                        wandb_metrics[f'{split}/{metric_name}'] = value.item()
+                wandb_metrics['learning_rate'] = self.optimizer.param_groups[0]['lr']
+                wandb.log(wandb_metrics, step=step)
+    
+            # Print metrics with tree structure
+            print(f"\n📊 Metrics (Epoch {step}):")
+            splits = sorted(gathered_metrics.keys())
+            for i, split in enumerate(splits):
+                is_last_split = i == len(splits) - 1
+                split_prefix = "└──" if is_last_split else "├──"
+                print(f"{split_prefix} {split.upper()}:")
+                
+                split_metrics = sorted(gathered_metrics[split].items())
+                for j, (metric_name, value) in enumerate(split_metrics):
+                    is_last_metric = j == len(split_metrics) - 1
                     metric_prefix = "    └──" if is_last_metric else "    ├──"
-                else:
-                    metric_prefix = "│   └──" if is_last_metric else "│   ├──"
-                print(f"{metric_prefix} {metric_name}: {value:.4f}")
-        
-        # Print learning rate
-        print("└── TRAINING:")
-        print(f"    └── learning_rate: {self.optimizer.param_groups[0]['lr']:.6f}")
-
+                    if not is_last_split:
+                        metric_prefix = f"│   {metric_prefix}"
+                    print(f"{metric_prefix} {metric_name}: {value.item():.4f}")
+            
+            print("└── TRAINING:")
+            print(f"    └── learning_rate: {self.optimizer.param_groups[0]['lr']:.6f}")
 
     def _save_attention_plot(self, attn_weights: torch.Tensor, epoch: int, attn_type: str = "self"):
         """Save attention weights visualization."""
@@ -330,17 +288,15 @@ class BaseTrainerTPU(ABC):
         """Save a checkpoint of the model and training state."""
         checkpoint_path = self.checkpoint_dir / filename
         checkpoint = {
+            'model_state_dict': self.accelerator.unwrap_model(self.model).state_dict()
             'epoch': self.current_epoch,
-            'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'scheduler_state_dict': self.scheduler.state_dict() if self.scheduler else None,
-            # Only save scaler state if scaler exists
-            'scaler_state_dict': self.scaler.state_dict() if self.scaler else None,
+            'scaler_state_dict': self.scaler.state_dict(),
             'best_metric': self.best_metric,
             'training_history': self.training_history,
             'config': self.config
         }
-
         torch.save(checkpoint, checkpoint_path)
         if self.use_wandb:
             wandb.save(str(checkpoint_path))
@@ -393,26 +349,7 @@ class BaseTrainerTPU(ABC):
         # Try loading scaler state
         try:
             self.scaler.load_state_dict(checkpoint['scaler_state_dict'])
-            # Try loading scaler state conditionally
-            load_status['scaler'] = False
-            scaler_state_in_checkpoint = checkpoint.get('scaler_state_dict') # Use .get for safety
-            
-            if self.scaler is not None and scaler_state_in_checkpoint is not None:
-                # Both trainer expects a scaler and checkpoint has it
-                try:
-                    self.scaler.load_state_dict(scaler_state_in_checkpoint)
-                    load_status['scaler'] = True
-                    print("Successfully loaded GradScaler state.")
-                except Exception as e:
-                    print(f"Warning: Failed to load scaler state: {e}")
-            elif self.scaler is not None and scaler_state_in_checkpoint is None:
-                # Trainer expects scaler, but checkpoint doesn't have it (e.g., loading TPU ckpt on GPU)
-                 print(f"Warning: Trainer uses GradScaler (CUDA), but checkpoint lacks scaler state. Scaler not loaded/reset.")
-            elif self.scaler is None and scaler_state_in_checkpoint is not None:
-                # Trainer doesn't use scaler, but checkpoint has it (e.g., loading GPU ckpt on TPU)
-                 print(f"Warning: Trainer does not use GradScaler (CPU/TPU), but checkpoint contains scaler state. Ignoring scaler state.")
-            # else: both are None, nothing to do.
-
+            load_status['scaler'] = True
         except Exception as e:
             print(f"Warning: Failed to load scaler state: {e}")
             load_status['scaler'] = False
