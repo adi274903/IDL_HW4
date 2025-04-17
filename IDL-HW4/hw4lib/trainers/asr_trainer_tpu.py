@@ -1,4 +1,4 @@
-from .base_trainer_tpu import BaseTrainerTPU
+from .base_trainer import BaseTrainer
 from typing import Dict, Any, Optional, List, Tuple, Union
 import torch
 import torch.nn as nn
@@ -12,15 +12,9 @@ import json
 import torchmetrics.text as tmt
 from torch.utils.data import Subset
 import pandas as pd
+from accelerate import Accelerator
 
-try:
-    import torch_xla.core.xla_model as xm
-    _XLA_AVAILABLE = True
-except ImportError:
-    _XLA_AVAILABLE = False
-
-
-class ASRTrainerTPU(BaseTrainerTPU):
+class ASRTrainer(BaseTrainer):
     """
     ASR (Automatic Speech Recognition) Trainer class that handles training, validation, and recognition loops.
 
@@ -84,8 +78,7 @@ class ASRTrainerTPU(BaseTrainerTPU):
             )
         
         
-
-
+    
     def _train_epoch(self, dataloader):
         """
         Train for one epoch.
@@ -113,20 +106,12 @@ class ASRTrainerTPU(BaseTrainerTPU):
         for i, batch in enumerate(dataloader):
             # TODO: Unpack batch and move to device
             padded_features, padded_shifted, padded_golden, feat_lengths, transcript_lengths = batch
+                        
             
-            feats = padded_features.to(self.device)
-
-            xm.mark_step()
-
-            
-            targets_shifted = padded_shifted.to(self.device) 
-            targets_golden = padded_golden.to(self.device)   
-            feat_lengths = feat_lengths.to(self.device)
-
             if transcript_lengths is not None:
                 transcript_lengths = transcript_lengths.to(self.device)
             
-            with torch.autocast(device_type='xla', dtype=torch.bfloat16):
+            with self.accelerator.autocast()::
                 # TODO: get raw predictions and attention weights and ctc inputs from model
                 seq_out, curr_att, ctc_inputs = self.model(feats, targets_shifted, feat_lengths,transcript_lengths)
                 
@@ -168,14 +153,13 @@ class ASRTrainerTPU(BaseTrainerTPU):
             loss = loss / self.config['training']['gradient_accumulation_steps']
 
             # TODO: Backpropagate the loss
-            loss.backward()
+            self.accelerator.backward(loss)
 
             # Only update weights after accumulating enough gradients
-            if (i + 1) % self.config['training']['gradient_accumulation_steps'] == 0:
-                xm.optimizer_step(self.optimizer, barrier=True)
-                if not isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                    self.scheduler.step()
-                
+            if self.accelerator.sync_gradients:
+                self.accelerator.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                self.optimizer.step()
+                self.scheduler.step()
                 self.optimizer.zero_grad()
 
             # Update progress bar
@@ -196,14 +180,14 @@ class ASRTrainerTPU(BaseTrainerTPU):
             # Clean up
             del feats, targets_shifted, targets_golden, feat_lengths, transcript_lengths
             del seq_out, curr_att, ctc_inputs, loss
-            
+            torch.cuda.empty_cache()
 
         # Handle remaining gradients
         if (len(dataloader) % self.config['training']['gradient_accumulation_steps']) != 0:
-            xm.optimizer_step(self.optimizer, barrier=True)
+            self.scaler.step(self.optimizer)
             if not isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                 self.scheduler.step()
-            
+            self.scaler.update()
             self.optimizer.zero_grad()
 
         # Compute final metrics
@@ -312,6 +296,10 @@ class ASRTrainerTPU(BaseTrainerTPU):
 
         # Set max transcript length
         self.text_max_len = max(val_dataloader.dataset.text_max_len, train_dataloader.dataset.text_max_len)
+        self.model, self.optimizer, train_dataloader, val_dataloader, self.scheduler = \
+        self.accelerator.prepare(
+            self.model, self.optimizer, train_dataloader, val_dataloader, self.scheduler
+        )
 
         # Training loop
         best_val_loss = float('inf')
@@ -523,7 +511,7 @@ class ASRTrainerTPU(BaseTrainerTPU):
 
                 # Clean up
                 del feats, feat_lengths, encoder_output, pad_mask_src, prompts
-                
+                torch.cuda.empty_cache()
 
                 # Post process sequences
                 post_processed_preds = generator.post_process_sequence(seqs, self.tokenizer)
@@ -616,7 +604,7 @@ class ASRTrainerTPU(BaseTrainerTPU):
     
 # -------------------------------------------------------------------------------------------------
 
-class ProgressiveTrainer(ASRTrainerTPU):
+class ProgressiveTrainer(ASRTrainer):
     """
     Progressive Trainer class that implements curriculum learning for ASR training.
 
@@ -870,15 +858,7 @@ class ProgressiveTrainer(ASRTrainerTPU):
             self.configure_stage(stage_config)
             # Get subset of train_dataloader
             subset_train_dataloader = self.get_subset_dataloader(train_dataloader, stage_config['data_subset'])
-            
-            # Inside progressive_train, after getting subset_loader
-            if isinstance(train_dataloader, pl.MpDeviceLoader):
-                 #print("Original dataloader is MpDeviceLoader, wrapping subset loader...") # Optional: for confirmation
-                 subset_train_dataloader = pl.MpDeviceLoader(subset_train_dataloader, self.device)
-              
             super().train(subset_train_dataloader, val_dataloader, epochs=stage_config['epochs'])
-
-            
 
     def transition_to_full_training(self):
         """Transition from progressive training to full training"""
