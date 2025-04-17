@@ -12,7 +12,12 @@ import json
 import torchmetrics.text as tmt
 from torch.utils.data import Subset
 import pandas as pd
-import torch_xla.core.xla_model as xm
+
+try:
+    import torch_xla.core.xla_model as xm
+    _XLA_AVAILABLE = True
+except ImportError:
+    _XLA_AVAILABLE = False
 
 
 class ASRTrainerTPU(BaseTrainerTPU):
