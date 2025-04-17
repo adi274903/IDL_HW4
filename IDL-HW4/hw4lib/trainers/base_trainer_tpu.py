@@ -288,7 +288,7 @@ class BaseTrainer(ABC):
         """Save a checkpoint of the model and training state."""
         checkpoint_path = self.checkpoint_dir / filename
         checkpoint = {
-            'model_state_dict': self.accelerator.unwrap_model(self.model).state_dict()
+            'model_state_dict': self.accelerator.unwrap_model(self.model).state_dict(),
             'epoch': self.current_epoch,
             'optimizer_state_dict': self.optimizer.state_dict(),
             'scheduler_state_dict': self.scheduler.state_dict() if self.scheduler else None,
