@@ -1,4 +1,4 @@
-from .base_trainer import BaseTrainer
+from .base_trainer import BaseTrainerTPU
 from typing import Dict, Any, Optional, List, Tuple, Union
 import torch
 import torch.nn as nn
