@@ -162,7 +162,7 @@ class ASRTrainer(BaseTrainer):
             # Only update weights after accumulating enough gradients
             if (i + 1) % self.config['training']['gradient_accumulation_steps'] == 0:
                 if self.accelerator.sync_gradients:
-                    self.accelerator.clip_grad_norm_(...)
+                    self.accelerator.clip_grad_norm_()
                 self.optimizer.step()
                 self.scheduler.step()
                 self.optimizer.zero_grad()
@@ -237,11 +237,12 @@ class ASRTrainer(BaseTrainer):
         config_name = f'validation_{"beam_" + str(bw) if bw > 1 else "greedy"}'
         
         # TODO: Call recognize
-        results = self.recognize(
-            dataloader,
-            recognition_config=validation_recog_config, # Pass the defined config
-            config_name=config_name
-        )
+        with self.accelerator.autocast():
+            results = self.recognize(
+                dataloader,
+                recognition_config=validation_recog_config, # Pass the defined config
+                config_name=config_name
+            )
 
        
         # --- Extract results and calculate metrics ---
@@ -252,34 +253,17 @@ class ASRTrainer(BaseTrainer):
                  return {'word_dist': float('inf'), 'wer': 100.0, 'cer': 100.0}, []
 
             # Safely extract references and hypotheses
-            references = [r['target'] for r in results if 'target' in r]
-            hypotheses = [r['generated'] for r in results if 'generated' in r]
+            references = self.accelerator.gather_for_metrics(references)
+            hypotheses = self.accelerator.gather_for_metrics(hypotheses)
 
-            if not references:
-                 print("Warning: No targets found in validation results to calculate metrics.")
-                 metrics = {'word_dist': float('inf'), 'wer': 100.0, 'cer': 100.0}
-            elif not hypotheses:
-                 print("Warning: No hypotheses generated in validation.")
-                 metrics = {'word_dist': float('inf'), 'wer': 100.0, 'cer': 100.0}
+            if self.accelerator.is_main_process:
+                metrics = self._calculate_asr_metrics(references, hypotheses)
             else:
-                 if len(references) != len(hypotheses):
-                      print(f"Warning: Mismatch ref/hyp counts ({len(references)}/{len(hypotheses)}). Truncating.")
-                      min_len = min(len(references), len(hypotheses))
-                      references = references[:min_len]
-                      hypotheses = hypotheses[:min_len]
-
-                 if not references: # Check again after potential truncation
-                      metrics = {'word_dist': float('inf'), 'wer': 100.0, 'cer': 100.0}
-                 else:
-                      metrics = self._calculate_asr_metrics(references, hypotheses)
-
-        except KeyError as e:
-             print(f"Error extracting results: Key missing. Error: {e}")
-             metrics = {'word_dist': float('inf'), 'wer': 100.0, 'cer': 100.0}
-        except Exception as e: # Catch other potential errors
-            print(f"Unexpected error during metric calculation: {e}")
-            metrics = {'word_dist': float('inf'), 'wer': 100.0, 'cer': 100.0}
-        return metrics, results
+                metrics = {}
+            
+            # Sync metrics across processes
+            metrics = self.accelerator.reduce(metrics, reduction="mean")
+            return metrics, results
     
     def train(self, train_dataloader, val_dataloader, epochs: int):
         """
@@ -424,7 +408,7 @@ class ASRTrainer(BaseTrainer):
             raise ValueError("text_max_len is not set. Please run training loop first or provide a max_length")
         
         # TODO: In-fill the recognize method
-        
+        self.model, generator = self.accelerator.prepare(self.model, generator)
 
         if recognition_config is None:
             # Default config (greedy search)
@@ -468,12 +452,7 @@ class ASRTrainer(BaseTrainer):
                     raise ValueError(f"Unexpected batch format with {len(batch)} elements.")
       
                 # TODO: Handle both cases where targets may or may not be None (val set v. test set) 
-                feats = padded_features.to(self.device)
-                feat_lengths = feat_lengths.to(self.device)
-                if padded_golden is not None:
-                    targets_golden = padded_golden.to(self.device)
-                else:
-                    targets_golden = None
+                
                 
                 # TODO: Encode speech features to hidden states
                 encoder_output, pad_mask_src, _, _ = self.model.encode(feats, feat_lengths)
