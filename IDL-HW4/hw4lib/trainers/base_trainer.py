@@ -82,7 +82,7 @@ class BaseTrainer(ABC):
     ):
         # If device is not specified, determine it
         if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            device = "cuda" if torch.cuda.is_available() else "xla"
         
         print(f"Using device: {device}")
         self.device = device
