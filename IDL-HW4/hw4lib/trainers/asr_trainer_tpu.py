@@ -12,6 +12,7 @@ import json
 import torchmetrics.text as tmt
 from torch.utils.data import Subset
 import pandas as pd
+import torch_xla.core.xla_model as xm
 
 
 class ASRTrainerTPU(BaseTrainerTPU):
