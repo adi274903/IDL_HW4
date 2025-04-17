@@ -51,7 +51,7 @@ class SequenceGenerator:
             score_fn: Callable,
             tokenizer: H4Tokenizer,
             max_length: int,
-            device: str = "cuda" if torch.cuda.is_available() else "cpu"
+            device: str = "cuda" if torch.cuda.is_available() else "xla"
     ):
         """
         Initialize the sequence generator.
