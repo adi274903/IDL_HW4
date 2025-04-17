@@ -386,143 +386,216 @@ class ASRTrainer(BaseTrainer):
         
         return eval_results
 
-    def recognize(self, dataloader, recognition_config: Optional[Dict[str, Any]] = None, config_name: Optional[str] = None, max_length: Optional[int] = None) -> List[Dict[str, Any]]:
-        """
-        Evaluate the model by generating transcriptions from audio features.
+    from .base_trainer import BaseTrainer
+from typing import Dict, Any, Optional, List, Tuple, Union
+import torch
+import torch.nn as nn
+from tqdm import tqdm
+import torch.nn.functional as F
+from ..decoding.sequence_generator import SequenceGenerator
+from ..utils import create_scheduler, create_optimizer
+from ..model import DecoderOnlyTransformer
+import torchaudio.functional as aF
+import json
+import torchmetrics.text as tmt
+from torch.utils.data import Subset
+import pandas as pd
+from accelerate import Accelerator
+
+class ASRTrainer(BaseTrainer):
+    def __init__(self, model, tokenizer, config, run_name, config_file, device=None):
+        super().__init__(model, tokenizer, config, run_name, config_file, device)
         
-        Args:
-            dataloader: DataLoader containing the evaluation data
-            recognition_config: Optional dictionary containing recognition parameters:
-                - num_batches: int, number of batches to process
-                - beam_width: int, beam search width
-                - temperature: float, temperature for beam search
-                - repeat_penalty: float, repeat penalty for beam search
-                - lm_weight: float, language model interpolation weight
-                - lm_model: Optional[DecoderOnlyTransformer], language model for shallow fusion
-            max_length: Optional[int], maximum length of the generated sequence
-        Returns:
-            List of dictionaries containing recognition results with generated sequences and scores
-            (targets included if available)
-        """
-        if max_length is None and not hasattr(self, 'text_max_len'):
-            raise ValueError("text_max_len is not set. Please run training loop first or provide a max_length")
+        # Initialize Accelerator with configuration
+        self.accelerator = Accelerator(
+            mixed_precision=config['training'].get('mixed_precision', 'fp16'),
+            gradient_accumulation_steps=config['training']['gradient_accumulation_steps']
+        )
         
-        # TODO: In-fill the recognize method
-        self.model, generator = self.accelerator.prepare(self.model, generator)
+        # Initialize loss functions
+        self.ce_criterion = nn.CrossEntropyLoss(
+            ignore_index=self.tokenizer.pad_id,
+            label_smoothing=self.config['loss'].get('label_smoothing', 0.0)
+        )
+        
+        self.ctc_criterion = None
+        self.ctc_weight = self.config['loss'].get('ctc_weight', 0.0)
+        if self.ctc_weight > 0:
+            self.ctc_criterion = nn.CTCLoss(
+                blank=self.tokenizer.pad_id,
+                zero_infinity=True
+            )
+    
+    def _train_epoch(self, dataloader):
+        self.model.train()
+        batch_bar = tqdm(total=len(dataloader), disable=not self.accelerator.is_local_main_process)
+        running_ce_loss = 0.0
+        running_ctc_loss = 0.0
+        running_joint_loss = 0.0
+        total_tokens = 0
+        running_att = None
 
-        if recognition_config is None:
-            # Default config (greedy search)
-            recognition_config = {
-                'num_batches': 5,
-                'beam_width': 1,
-                'temperature': 1.0,
-                'repeat_penalty': 1.0,
-                'lm_weight': 0.0,
-                'lm_model': None
-            }
-            config_name = 'greedy'
+        self.optimizer.zero_grad()
 
-        if recognition_config.get('lm_model') is not None:
-            recognition_config['lm_model'].eval()
-            recognition_config['lm_model'].to(self.device)
+        for i, batch in enumerate(dataloader):
+            padded_features, padded_shifted, padded_golden, feat_lengths, transcript_lengths = batch
 
-        # Initialize sequence generator
-        generator = SequenceGenerator(
-            score_fn=None,  # Will be set for each batch
-            tokenizer=self.tokenizer,
-            max_length=max_length if max_length is not None else self.text_max_len,
-            device=self.device
+            with self.accelerator.autocast():
+                seq_out, curr_att, ctc_inputs = self.model(
+                    padded_features, 
+                    padded_shifted, 
+                    feat_lengths,
+                    transcript_lengths
+                )
+                
+                running_att = curr_att
+                ce_loss = self.ce_criterion(
+                    seq_out.view(-1, self.tokenizer.vocab_size),
+                    padded_golden.view(-1)
+                )
+
+                loss = ce_loss
+                if self.ctc_weight > 0 and self.ctc_criterion:
+                    ctc_loss = self.ctc_criterion(
+                        ctc_inputs['log_probs'].transpose(0, 1),
+                        padded_golden,
+                        ctc_inputs['lengths'],
+                        transcript_lengths
+                    )
+                    loss += self.ctc_weight * ctc_loss
+                    running_ctc_loss += ctc_loss.item()
+
+            # Accelerate-specific scaling
+            loss = loss / self.config['training']['gradient_accumulation_steps']
+            self.accelerator.backward(loss)
+
+            if (i + 1) % self.config['training']['gradient_accumulation_steps'] == 0:
+                if self.accelerator.sync_gradients:
+                    self.accelerator.clip_grad_norm_(self.model.parameters(), 1.0)
+                self.optimizer.step()
+                self.scheduler.step()
+                self.optimizer.zero_grad()
+
+            # Update metrics
+            batch_tokens = transcript_lengths.sum().item()
+            total_tokens += batch_tokens
+            running_ce_loss += ce_loss.item() * batch_tokens
+            running_joint_loss += loss.item() * batch_tokens
+
+            # Update progress bar on main process
+            if self.accelerator.is_local_main_process:
+                batch_bar.update()
+                batch_bar.set_postfix({
+                    'ce_loss': f"{running_ce_loss/total_tokens:.4f}",
+                    'ctc_loss': f"{running_ctc_loss/total_tokens:.4f}",
+                    'joint_loss': f"{running_joint_loss/total_tokens:.4f}"
+                })
+
+        # Final metrics calculation
+        metrics = {
+            'ce_loss': running_ce_loss / total_tokens,
+            'ctc_loss': running_ctc_loss / total_tokens,
+            'joint_loss': running_joint_loss / total_tokens
+        }
+        
+        self.accelerator.wait_for_everyone()
+        return metrics, running_att
+
+    def _validate_epoch(self, dataloader):
+        self.model.eval()
+        val_config = self.config.get('validation', {})
+        
+        with self.accelerator.autocast():
+            results = self.recognize(dataloader, {
+                'num_batches': None,
+                'beam_width': val_config.get('beam_width', 5),
+                'temperature': val_config.get('temperature', 1.0)
+            })
+
+        # Gather results across devices
+        gathered_results = self.accelerator.gather(results)
+        
+        # Calculate metrics on main process
+        if self.accelerator.is_main_process:
+            references = [r['target'] for r in gathered_results]
+            hypotheses = [r['generated'] for r in gathered_results]
+            metrics = self._calculate_asr_metrics(references, hypotheses)
+        else:
+            metrics = {}
+
+        # Sync metrics across processes
+        metrics = self.accelerator.reduce(metrics, reduction="mean")
+        return metrics, gathered_results
+    
+    def train(self, train_dataloader, val_dataloader, epochs: int):
+        # Prepare components with Accelerator
+        (
+            self.model, 
+            self.optimizer, 
+            train_dataloader, 
+            val_dataloader, 
+            self.scheduler
+        ) = self.accelerator.prepare(
+            self.model, 
+            self.optimizer, 
+            train_dataloader, 
+            val_dataloader, 
+            self.scheduler
         )
 
-        # Initialize variables
+        for epoch in range(epochs):
+            train_metrics, train_attn = self._train_epoch(train_dataloader)
+            val_metrics, val_results = self._validate_epoch(val_dataloader)
+
+            # Logging and checkpoint saving on main process
+            if self.accelerator.is_main_process:
+                self._log_metrics({'train': train_metrics, 'val': val_metrics}, epoch)
+                self.save_checkpoint('checkpoint-last-epoch.pth')
+
+            # Step scheduler if Plateau-based
+            if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                self.scheduler.step(val_metrics['cer'])
+
+        # Final model saving
+        self.accelerator.wait_for_everyone()
+        if self.accelerator.is_main_process:
+            unwrapped_model = self.accelerator.unwrap_model(self.model)
+            torch.save(unwrapped_model.state_dict(), "final_model.pth")
+            
+    def recognize(self, dataloader, recognition_config=None, config_name=None):
         self.model.eval()
-        batch_bar = tqdm(total=len(dataloader), dynamic_ncols=True, leave=False, position=0, desc=f"[Recognizing ASR] : {config_name}")
+        generator = SequenceGenerator(
+            self.tokenizer,
+            max_length=self.text_max_len,
+            device=self.accelerator.device
+        )
+
         results = []
-
-        # Run inference
         with torch.inference_mode():
-            for i, batch in enumerate(dataloader):
-                # TODO: Unpack batch and move to device
-                if len(batch) == 5:
-                    padded_features, padded_shifted, padded_golden, feat_lengths, transcript_lengths = batch
-                elif len(batch) == 3: # Assuming test might return (feats, None, None, feat_lengths, None) structure adjusted in collate? Or just (feats, feat_lengths)? Check collate_fn output for test set carefully.
-                                      # Let's assume collate_fn returns 5 elements, some are None for test set:
-                     padded_features, _, padded_golden, feat_lengths, _ = batch # Get targets_golden if available, ignore shifted/transcript_lengths for test recognition
-                else:
-                    raise ValueError(f"Unexpected batch format with {len(batch)} elements.")
-      
-                # TODO: Handle both cases where targets may or may not be None (val set v. test set) 
-                
-                
-                # TODO: Encode speech features to hidden states
-                encoder_output, pad_mask_src, _, _ = self.model.encode(feats, feat_lengths)
+            for batch in tqdm(dataloader, disable=not self.accelerator.is_local_main_process):
+                padded_features, _, _, feat_lengths, _ = batch
 
-                # Define scoring function for this batch
-                def get_score(x):
-                    asr_logits = self.model.score(x, encoder_output, pad_mask_src)
-                    if recognition_config.get('lm_model') is not None:
-                        lm_logits = recognition_config['lm_model'].score(x)
-                        return asr_logits + recognition_config['lm_weight'] * lm_logits
-                    return asr_logits
-                
-                # Set score function of generator
-                generator.score_fn = get_score
+                # Encoding with Accelerate context
+                with self.accelerator.autocast():
+                    encoder_output = self.model.encode(padded_features, feat_lengths)
 
-                # TODO: Initialize prompts as a batch of SOS tokens
-                batch_size = feats.size(0)
-                prompts = torch.full((batch_size, 1), self.tokenizer.sos_id, dtype=torch.long, device=self.device)
+                # Generate sequences
+                seqs, _ = generator.generate_greedy(
+                    torch.full((padded_features.size(0), 1), self.tokenizer.sos_id, 
+                             device=self.accelerator.device),
+                    encoder_output=encoder_output
+                )
 
-                # TODO: Generate sequences
-                if recognition_config['beam_width'] > 1:
-                    # TODO: If you have implemented beam search, generate sequences using beam search
-                    seqs, scores = generator.generate_beam(
-                        prompts, 
-                        beam_width=recognition_config['beam_width'],
-                        temperature=recognition_config['temperature'],
-                        repeat_penalty=recognition_config['repeat_penalty']
-                    ) # Remove if you implemented the beam search method
+                # Post-process and store results
+                post_processed = generator.post_process_sequence(seqs, self.tokenizer)
+                results.extend([{
+                    'generated': self.tokenizer.decode(seq.tolist()),
+                    'score': 0.0
+                } for seq in post_processed])
 
-                    # Pick best beam
-                    seqs = seqs[:, 0, :]
-                    scores = scores[:, 0]
-                else:
-                    # TODO: Generate sequences using greedy search
-                    seqs, scores = generator.generate_greedy(
-                        prompts,
-                        temperature=recognition_config['temperature'],
-                        repeat_penalty=recognition_config['repeat_penalty']
-                    )
+        return self.accelerator.gather(results)
 
-                # Clean up
-                del feats, feat_lengths, encoder_output, pad_mask_src, prompts
-                torch.cuda.empty_cache()
-
-                # Post process sequences
-                post_processed_preds = generator.post_process_sequence(seqs, self.tokenizer)
-                
-                # Store results as a list of dictionaries with target and generated sequences and scores
-                if targets_golden is not None:
-                    post_processed_targets = generator.post_process_sequence(targets_golden, self.tokenizer)
-                    for j, (pred, target) in enumerate(zip(post_processed_preds, post_processed_targets)):
-                        results.append({
-                            'target': self.tokenizer.decode(target.tolist(), skip_special_tokens=True),
-                            'generated': self.tokenizer.decode(pred.tolist(), skip_special_tokens=True),
-                            'score': scores[j].item()
-                        })
-                else:
-                    for j, pred in enumerate(post_processed_preds):
-                        results.append({
-                            'generated': self.tokenizer.decode(pred.tolist(), skip_special_tokens=True),
-                            'score': scores[j].item()
-                        })
-
-                batch_bar.update()
-
-                if recognition_config['num_batches'] is not None and i >= recognition_config['num_batches'] - 1:
-                    break
-
-            batch_bar.close()
-            return results
+    # Remaining methods unchanged but ensure all device management is removed
 
     def _get_evaluation_recognition_configs(self, lm_model: Optional[DecoderOnlyTransformer] = None, lm_weight: float = 0.0) -> Dict[str, Dict[str, Any]]:
         """
