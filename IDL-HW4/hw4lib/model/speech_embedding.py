@@ -154,7 +154,7 @@ class StackedBLSTMEmbedding(nn.Module):
             # --- Original Path (CPU/GPU using pack_padded_sequence) ---
             # print("Using CPU/GPU path with pack_padded_sequence") # Optional debug print
             try:
-                packed_input = pack_padded_sequence(x, x_len.cpu(), batch_first=True, enforce_sorted=False)
+                packed_input = pack_padded_sequence(x, x_len, batch_first=True, enforce_sorted=False) #xlen.cpu()
             except RuntimeError as e:
                 print(f"Error during pack_padded_sequence (Non-XLA): {e}")
                 print(f"Input shape: {x.shape}, Lengths: {x_len}, Device: {x.device}")
@@ -172,7 +172,7 @@ class StackedBLSTMEmbedding(nn.Module):
             # Second BLSTM
             try:
                 # Ensure lengths used for packing are on CPU
-                packed_input = pack_padded_sequence(output, x_len.cpu(), batch_first=True, enforce_sorted=False)
+                packed_input = pack_padded_sequence(output, x_len, batch_first=True, enforce_sorted=False) #xlen.cpu()
             except RuntimeError as e:
                 print(f"Error during pack_padded_sequence 2 (Non-XLA): {e}")
                 print(f"Input shape: {output.shape}, Lengths: {x_len}, Device: {output.device}")
