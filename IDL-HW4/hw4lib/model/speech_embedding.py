@@ -3,6 +3,13 @@ import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torchinfo import summary
 
+try:
+    import torch_xla.core.xla_model as xm
+    XLA_AVAILABLE = True
+except ImportError:
+    XLA_AVAILABLE = False
+
+
 '''
 This file implements speech feature embedding for ASR (Automatic Speech Recognition) tasks.
 It contains three key components:
@@ -144,6 +151,8 @@ class StackedBLSTMEmbedding(nn.Module):
         packed_input = pack_padded_sequence(x, x_len.cpu(), batch_first=True, enforce_sorted=False)
         packed_output, _ = self.blstm1(packed_input)
         output, _ = pad_packed_sequence(packed_output, batch_first=True, total_length=x.size(1))
+        if XLA_AVAILABLE:
+           xm.mark_step()
         
         # First max pooling
         output = output.transpose(1, 2)  # (batch, hidden_dim, seq_len)
@@ -155,6 +164,8 @@ class StackedBLSTMEmbedding(nn.Module):
         packed_input = pack_padded_sequence(output, x_len.cpu(), batch_first=True, enforce_sorted=False)
         packed_output, _ = self.blstm2(packed_input)
         output, _ = pad_packed_sequence(packed_output, batch_first=True, total_length=output.size(1))
+        if XLA_AVAILABLE:
+           xm.mark_step()
         
         # Second max pooling
         output = output.transpose(1, 2)
