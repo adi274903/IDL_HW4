@@ -14,7 +14,7 @@ from torch.utils.data import Subset
 import pandas as pd
 from accelerate import Accelerator
 
-class ASRTrainer(BaseTrainer):
+class ASRTrainerTPU(BaseTrainer):
     """
     ASR (Automatic Speech Recognition) Trainer class that handles training, validation, and recognition loops.
 
