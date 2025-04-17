@@ -124,10 +124,12 @@ class StackedBLSTMEmbedding(nn.Module):
         """
         Calculate output length for a pooling layer using the formula:
         L_out = floor((L_in + 2 * padding - dilation * (kernel_size - 1) - 1) / stride + 1)
+        Handles tensor inputs robustly.
         """
-        numerator = (L_in + 2 * pool_params["padding"] - 
+        numerator = (L_in.float() + 2 * pool_params["padding"] -
                     pool_params["dilation"] * (pool_params["kernel_size"] - 1) - 1)
-        return (numerator // pool_params["stride"] + 1).to(torch.long)
+        # Use float division then floor and convert back to long
+        return torch.floor(numerator / pool_params["stride"] + 1).long()
     
     def calculate_downsampled_length(self, lengths: torch.Tensor) -> torch.Tensor:
         """
@@ -148,35 +150,88 @@ class StackedBLSTMEmbedding(nn.Module):
             tuple: (output tensor, downsampled lengths)
         """
         # First BLSTM
-        packed_input = pack_padded_sequence(x, x_len.cpu(), batch_first=True, enforce_sorted=False)
-        packed_output, _ = self.blstm1(packed_input)
-        output, _ = pad_packed_sequence(packed_output, batch_first=True, total_length=x.size(1))
-        if XLA_AVAILABLE:
-           xm.mark_step()
-        
-        # First max pooling
-        output = output.transpose(1, 2)  # (batch, hidden_dim, seq_len)
-        output = self.pool1(output)
-        output = output.transpose(1, 2)  # (batch, seq_len, hidden_dim)
-        x_len = self.calculate_pool_output_length(x_len, self.pool1_params)
-        
-        # Second BLSTM
-        packed_input = pack_padded_sequence(output, x_len.cpu(), batch_first=True, enforce_sorted=False)
-        packed_output, _ = self.blstm2(packed_input)
-        output, _ = pad_packed_sequence(packed_output, batch_first=True, total_length=output.size(1))
-        if XLA_AVAILABLE:
-           xm.mark_step()
-        
-        # Second max pooling
-        output = output.transpose(1, 2)
-        output = self.pool2(output)
-        output = output.transpose(1, 2)
-        x_len = self.calculate_pool_output_length(x_len, self.pool2_params)
-        
+        is_xla = _XLA_AVAILABLE and ('xla' in str(x.device).lower())
+
+        if not is_xla:
+            # --- Original Path (CPU/GPU using pack_padded_sequence) ---
+            # print("Using CPU/GPU path with pack_padded_sequence") # Optional debug print
+            try:
+                packed_input = pack_padded_sequence(x, x_len.cpu(), batch_first=True, enforce_sorted=False)
+            except RuntimeError as e:
+                print(f"Error during pack_padded_sequence (Non-XLA): {e}")
+                print(f"Input shape: {x.shape}, Lengths: {x_len}, Device: {x.device}")
+                raise e
+            packed_output, _ = self.blstm1(packed_input)
+            output, _ = pad_packed_sequence(packed_output, batch_first=True, total_length=x.size(1))
+            # Note: No xm.mark_step() here
+
+            # First max pooling
+            output = output.transpose(1, 2)  # (B, H, T)
+            output = self.pool1(output)      # (B, H, T_new)
+            output = output.transpose(1, 2)  # (B, T_new, H)
+            x_len = self.calculate_pool_output_length(x_len, self.pool1_params)
+
+            # Second BLSTM
+            try:
+                # Ensure lengths used for packing are on CPU
+                packed_input = pack_padded_sequence(output, x_len.cpu(), batch_first=True, enforce_sorted=False)
+            except RuntimeError as e:
+                print(f"Error during pack_padded_sequence 2 (Non-XLA): {e}")
+                print(f"Input shape: {output.shape}, Lengths: {x_len}, Device: {output.device}")
+                raise e
+            packed_output, _ = self.blstm2(packed_input)
+            output, _ = pad_packed_sequence(packed_output, batch_first=True, total_length=output.size(1))
+            # Note: No xm.mark_step() here
+
+            # Second max pooling
+            output = output.transpose(1, 2) # (B, H, T_new2)
+            output = self.pool2(output)     # (B, H, T_new3)
+            output = output.transpose(1, 2) # (B, T_new3, H)
+            x_len = self.calculate_pool_output_length(x_len, self.pool2_params)
+
+        else:
+            # --- XLA Path (TPU without pack_padded_sequence) ---
+            # print("Using XLA path without pack_padded_sequence") # Optional debug print
+
+            # First BLSTM (runs on padded sequence)
+            output, _ = self.blstm1(x) # (B, T, H)
+
+            # First max pooling
+            output = output.transpose(1, 2) # (B, H, T)
+            output = self.pool1(output)     # (B, H, T_new)
+            output = output.transpose(1, 2) # (B, T_new, H)
+            # Update lengths based on pooling operation
+            x_len = self.calculate_pool_output_length(x_len, self.pool1_params)
+
+            # Create mask AFTER pooling based on new lengths
+            max_len_1 = output.size(1) # Get current max length
+            # Create mask on the same device as output
+            mask1 = torch.arange(max_len_1, device=output.device)[None, :] < x_len[:, None] # (B, T_new)
+            # Apply mask: Zero out padded time steps before next LSTM
+            output = output * mask1.unsqueeze(-1)
+
+            # Second BLSTM (runs on masked, potentially padded sequence from previous step)
+            output, _ = self.blstm2(output) # (B, T_new, H)
+
+            # Second max pooling
+            output = output.transpose(1, 2) # (B, H, T_new)
+            output = self.pool2(output)     # (B, H, T_new2)
+            output = output.transpose(1, 2) # (B, T_new2, H)
+            # Update lengths based on second pooling
+            x_len = self.calculate_pool_output_length(x_len, self.pool2_params)
+
+            # Create mask AFTER second pooling based on final lengths
+            max_len_2 = output.size(1) # Get final max length
+            # Create mask on the same device as output
+            mask2 = torch.arange(max_len_2, device=output.device)[None, :] < x_len[:, None] # (B, T_new2)
+            # Apply mask: Zero out padded time steps before final linear layer
+            output = output * mask2.unsqueeze(-1)
+
+        # --- Common Operations ---
         # Final linear embedding and dropout
         output = self.linear_embed(output)
         output = self.dropout(output)
-        
+
         return output, x_len
 
 ## -------------------------------------------------------------------------------------------------
