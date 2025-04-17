@@ -231,7 +231,9 @@ class ASRTrainer(BaseTrainer):
             avg_ce_loss = running_ce_loss / total_tokens
             avg_ctc_loss = running_ctc_loss / total_tokens
             avg_joint_loss = running_joint_loss / total_tokens
-            perplexity = torch.exp(torch.tensor(avg_ce_loss))
+            #perplexity = torch.exp(torch.tensor(avg_ce_loss))
+            ## Optimization
+            perplexity = math.exp(avg_ce_loss)
             
             batch_bar.set_postfix(
                 ce_loss=f"{avg_ce_loss:.4f}",
@@ -245,7 +247,7 @@ class ASRTrainer(BaseTrainer):
             # Clean up
             del feats, targets_shifted, targets_golden, feat_lengths, transcript_lengths
             del seq_out, curr_att, ctc_inputs, loss
-            torch.cuda.empty_cache()
+            #torch.cuda.empty_cache()
 
         # Handle remaining gradients
         if (len(dataloader) % self.config['training']['gradient_accumulation_steps']) != 0:
@@ -572,7 +574,7 @@ class ASRTrainer(BaseTrainer):
 
                 # Clean up
                 del feats, feat_lengths, encoder_output, pad_mask_src, prompts
-                torch.cuda.empty_cache()
+                #torch.cuda.empty_cache()
 
                 # Post process sequences
                 post_processed_preds = generator.post_process_sequence(seqs, self.tokenizer)
