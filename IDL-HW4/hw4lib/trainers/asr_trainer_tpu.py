@@ -109,6 +109,10 @@ class ASRTrainerTPU(BaseTrainerTPU):
             padded_features, padded_shifted, padded_golden, feat_lengths, transcript_lengths = batch
             
             feats = padded_features.to(self.device)
+
+            xm.mark_step()
+
+            
             targets_shifted = padded_shifted.to(self.device) 
             targets_golden = padded_golden.to(self.device)   
             feat_lengths = feat_lengths.to(self.device)
