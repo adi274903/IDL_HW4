@@ -14,6 +14,11 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, Tuple
 from torchinfo import summary
 
+try:
+    import torch_xla.core.xla_model as xm
+    _XLA_AVAILABLE = True
+except ImportError:
+    _XLA_AVAILABLE = False
 
 class BaseTrainerTPU(ABC):
     """
