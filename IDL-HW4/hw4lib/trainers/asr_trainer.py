@@ -574,7 +574,7 @@ class ASRTrainer(BaseTrainer):
 
                 # Clean up
                 del feats, feat_lengths, encoder_output, pad_mask_src, prompts
-                #torch.cuda.empty_cache()
+                torch.cuda.empty_cache()
 
                 # Post process sequences
                 post_processed_preds = generator.post_process_sequence(seqs, self.tokenizer)
