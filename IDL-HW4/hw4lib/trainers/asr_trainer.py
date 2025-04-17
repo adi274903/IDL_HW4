@@ -231,9 +231,9 @@ class ASRTrainer(BaseTrainer):
             avg_ce_loss = running_ce_loss / total_tokens
             avg_ctc_loss = running_ctc_loss / total_tokens
             avg_joint_loss = running_joint_loss / total_tokens
-            #perplexity = torch.exp(torch.tensor(avg_ce_loss))
+            perplexity = torch.exp(torch.tensor(avg_ce_loss))
             ## Optimization
-            perplexity = math.exp(avg_ce_loss)
+            #perplexity = math.exp(avg_ce_loss)
             
             batch_bar.set_postfix(
                 ce_loss=f"{avg_ce_loss:.4f}",
