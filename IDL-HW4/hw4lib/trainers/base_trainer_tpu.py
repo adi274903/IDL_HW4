@@ -13,7 +13,7 @@ import shutil
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, Tuple
 from torchinfo import summary
-import torch_xla.core.xla_model as xm
+
 
 try:
     import torch_xla.core.xla_model as xm
