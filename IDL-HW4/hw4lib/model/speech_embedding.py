@@ -2,12 +2,12 @@ import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torchinfo import summary
-
+_XLA_AVAILABLE = False
 try:
     import torch_xla.core.xla_model as xm
-    XLA_AVAILABLE = True
-except ImportError:
-    XLA_AVAILABLE = False
+    _XLA_AVAILABLE = True
+
+    
 
 
 '''
