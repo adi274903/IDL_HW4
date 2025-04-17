@@ -209,8 +209,9 @@ class ASRTrainer(BaseTrainer):
             'joint_loss': avg_joint_loss,
             'perplexity_token': avg_perplexity_token.item(),
             'perplexity_char': avg_perplexity_char.item()
-        }, running_att
+            }, running_att
 
+    
     def _validate_epoch(self, dataloader):
         """
         Validate for one epoch.
