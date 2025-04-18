@@ -101,7 +101,7 @@ class StackedBLSTMEmbedding(nn.Module):
         )
 
         self.lstm = nn.LSTM(
-            hidden_dim*2, hidden_dim,
+            hidden_dim, hidden_dim//2,
             num_layers = 2,
             batch_first = True,
             bidirectional = True
