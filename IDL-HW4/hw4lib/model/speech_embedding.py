@@ -193,12 +193,12 @@ class StackedBLSTMEmbedding(nn.Module):
             # Apply mask: Zero out padded time steps before final linear layer
             output = output * mask2.unsqueeze(-1)
 
-        # --- Common Operations ---
-        # Final linear embedding and dropout
-        output = self.linear_embed(output)
-        output = self.dropout(output)
-
-        return output, x_len
+            # --- Common Operations ---
+            # Final linear embedding and dropout
+            output = self.linear_embed(output)
+            output = self.dropout(output)
+    
+            return output, x_len
 
 ## -------------------------------------------------------------------------------------------------
 ## Conv2DSubsampling Class
