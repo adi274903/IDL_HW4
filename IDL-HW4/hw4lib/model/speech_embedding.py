@@ -147,14 +147,14 @@ class StackedBLSTMEmbedding(nn.Module):
         return lengths
 
     def forward(self, x, x_len):
-        """
-        Args:
-            x: Input tensor (batch_size, seq_len, input_dim)
-            x_len: Original sequence lengths (batch_size)
-        Returns:
-            tuple: (output tensor, downsampled lengths)
-        """
-        # First BLSTM
+            """
+            Args:
+                x: Input tensor (batch_size, seq_len, input_dim)
+                x_len: Original sequence lengths (batch_size)
+            Returns:
+                tuple: (output tensor, downsampled lengths)
+            """
+            # First BLSTM
             # --- XLA Path (TPU without pack_padded_sequence) ---
             # print("Using XLA path without pack_padded_sequence") # Optional debug print
 
