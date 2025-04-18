@@ -99,6 +99,13 @@ class StackedBLSTMEmbedding(nn.Module):
             batch_first=True,
             bidirectional=True
         )
+
+        self.lstm = nn.LSTM(
+            hidden_dim*2, hidden_dim,
+            num_layers = 2,
+            batch_first = True,
+            bidirectional = True
+        )
         
         # Max pooling layers
         self.pool1 = nn.MaxPool1d(**self.pool1_params)
@@ -148,51 +155,12 @@ class StackedBLSTMEmbedding(nn.Module):
             tuple: (output tensor, downsampled lengths)
         """
         # First BLSTM
-        is_xla = _XLA_AVAILABLE and ('xla' in str(x.device).lower())
-
-        if not is_xla:
-            # --- Original Path (CPU/GPU using pack_padded_sequence) ---
-            # print("Using CPU/GPU path with pack_padded_sequence") # Optional debug print
-            try:
-                packed_input = pack_padded_sequence(x, x_len.cpu(), batch_first=True, enforce_sorted=False) #xlen.cpu()
-            except RuntimeError as e:
-                print(f"Error during pack_padded_sequence (Non-XLA): {e}")
-                print(f"Input shape: {x.shape}, Lengths: {x_len}, Device: {x.device}")
-                raise e
-            packed_output, _ = self.blstm1(packed_input)
-            output, _ = pad_packed_sequence(packed_output, batch_first=True, total_length=x.size(1))
-            # Note: No xm.mark_step() here
-
-            # First max pooling
-            output = output.transpose(1, 2)  # (B, H, T)
-            output = self.pool1(output)      # (B, H, T_new)
-            output = output.transpose(1, 2)  # (B, T_new, H)
-            x_len = self.calculate_pool_output_length(x_len, self.pool1_params)
-
-            # Second BLSTM
-            try:
-                # Ensure lengths used for packing are on CPU
-                packed_input = pack_padded_sequence(output, x_len.cpu(), batch_first=True, enforce_sorted=False) #xlen.cpu()
-            except RuntimeError as e:
-                print(f"Error during pack_padded_sequence 2 (Non-XLA): {e}")
-                print(f"Input shape: {output.shape}, Lengths: {x_len}, Device: {output.device}")
-                raise e
-            packed_output, _ = self.blstm2(packed_input)
-            output, _ = pad_packed_sequence(packed_output, batch_first=True, total_length=output.size(1))
-            # Note: No xm.mark_step() here
-
-            # Second max pooling
-            output = output.transpose(1, 2) # (B, H, T_new2)
-            output = self.pool2(output)     # (B, H, T_new3)
-            output = output.transpose(1, 2) # (B, T_new3, H)
-            x_len = self.calculate_pool_output_length(x_len, self.pool2_params)
-
-        else:
             # --- XLA Path (TPU without pack_padded_sequence) ---
             # print("Using XLA path without pack_padded_sequence") # Optional debug print
 
             # First BLSTM (runs on padded sequence)
-            output, _ = self.blstm1(x) # (B, T, H)
+            output,_ = self.lstm(x)
+            output, _ = self.blstm1(output) # (B, T, H)
 
             # First max pooling
             output = output.transpose(1, 2) # (B, H, T)
