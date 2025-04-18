@@ -160,6 +160,10 @@ class StackedBLSTMEmbedding(nn.Module):
 
             # First BLSTM (runs on padded sequence)
             output,_ = self.lstm(x)
+            output = output.transpose(1, 2) # (B, H, T)
+            output = self.pool1(output)     # (B, H, T_new)
+            output = output.transpose(1, 2) # (B, T_new, H)
+        
             output, _ = self.blstm1(output) # (B, T, H)
 
             # First max pooling
