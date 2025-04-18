@@ -67,8 +67,8 @@ class StackedBLSTMEmbedding(nn.Module):
         if not 0 <= dropout < 1:
             raise ValueError("Dropout rate must be between 0 and 1")
             
-        # Calculate strides for the two pooling layers
-        self.stride1, self.stride2 = self.closest_factors(time_reduction)
+        # Calculate strides for the three pooling layers
+        self.stride1, self.stride2, self.stride3 = self.closest_factors(time_reduction)
         
         # Pool configurations
         self.pool1_params = {
@@ -78,6 +78,13 @@ class StackedBLSTMEmbedding(nn.Module):
             "dilation": 1
         }
         self.pool2_params = {
+            "kernel_size": self.stride2,
+            "stride": self.stride2,
+            "padding": 0,
+            "dilation": 1
+        }
+
+        self.pool3_params = {
             "kernel_size": self.stride2,
             "stride": self.stride2,
             "padding": 0,
@@ -110,6 +117,7 @@ class StackedBLSTMEmbedding(nn.Module):
         # Max pooling layers
         self.pool1 = nn.MaxPool1d(**self.pool1_params)
         self.pool2 = nn.MaxPool1d(**self.pool2_params)
+        self.pool3 = nn.MaxPool1d(**self.pool3_params)
         
         # Final linear embedding and dropout
         self.linear_embed = nn.Linear(hidden_dim, output_dim)
@@ -178,34 +186,34 @@ class StackedBLSTMEmbedding(nn.Module):
 
             # First max pooling
             output = output.transpose(1, 2) # (B, H, T)
-            output = self.pool1(output)     # (B, H, T_new)
+            output = self.pool2(output)     # (B, H, T_new)
             output = output.transpose(1, 2) # (B, T_new, H)
             # Update lengths based on pooling operation
-            x_len = self.calculate_pool_output_length(x_len, self.pool1_params)
+            x_len = self.calculate_pool_output_length(x_len, self.pool2_params)
 
             # Create mask AFTER pooling based on new lengths
-            max_len_1 = output.size(1) # Get current max length
+            max_len_2 = output.size(1) # Get current max length
             # Create mask on the same device as output
-            mask1 = torch.arange(max_len_1, device=output.device)[None, :] < x_len[:, None] # (B, T_new)
+            mask2 = torch.arange(max_len_2, device=output.device)[None, :] < x_len[:, None] # (B, T_new)
             # Apply mask: Zero out padded time steps before next LSTM
-            output = output * mask1.unsqueeze(-1)
+            output = output * mask2.unsqueeze(-1)
 
             # Second BLSTM (runs on masked, potentially padded sequence from previous step)
             output, _ = self.blstm2(output) # (B, T_new, H)
 
             # Second max pooling
             output = output.transpose(1, 2) # (B, H, T_new)
-            output = self.pool2(output)     # (B, H, T_new2)
+            output = self.pool3(output)     # (B, H, T_new2)
             output = output.transpose(1, 2) # (B, T_new2, H)
             # Update lengths based on second pooling
-            x_len = self.calculate_pool_output_length(x_len, self.pool2_params)
+            x_len = self.calculate_pool_output_length(x_len, self.pool3_params)
 
             # Create mask AFTER second pooling based on final lengths
-            max_len_2 = output.size(1) # Get final max length
+            max_len_3 = output.size(1) # Get final max length
             # Create mask on the same device as output
-            mask2 = torch.arange(max_len_2, device=output.device)[None, :] < x_len[:, None] # (B, T_new2)
+            mask3 = torch.arange(max_len_3, device=output.device)[None, :] < x_len[:, None] # (B, T_new2)
             # Apply mask: Zero out padded time steps before final linear layer
-            output = output * mask2.unsqueeze(-1)
+            output = output * mask3.unsqueeze(-1)
 
             # --- Common Operations ---
             # Final linear embedding and dropout
