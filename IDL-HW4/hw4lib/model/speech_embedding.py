@@ -160,9 +160,19 @@ class StackedBLSTMEmbedding(nn.Module):
 
             # First BLSTM (runs on padded sequence)
             output,_ = self.lstm(x)
+        
             output = output.transpose(1, 2) # (B, H, T)
             output = self.pool1(output)     # (B, H, T_new)
             output = output.transpose(1, 2) # (B, T_new, H)
+
+            x_len = self.calculate_pool_output_length(x_len, self.pool1_params)
+
+            # Create mask AFTER pooling based on new lengths
+            max_len_1 = output.size(1) # Get current max length
+            # Create mask on the same device as output
+            mask1 = torch.arange(max_len_1, device=output.device)[None, :] < x_len[:, None] # (B, T_new)
+            # Apply mask: Zero out padded time steps before next LSTM
+            output = output * mask1.unsqueeze(-1)
         
             output, _ = self.blstm1(output) # (B, T, H)
 
