@@ -68,7 +68,7 @@ class StackedBLSTMEmbedding(nn.Module):
             raise ValueError("Dropout rate must be between 0 and 1")
             
         # Calculate strides for the three pooling layers
-        self.stride1, self.stride2, self.stride3 = self.closest_factors(time_reduction)
+        self.stride1, self.stride2 = self.closest_factors(time_reduction)
         
         # Pool configurations
         self.pool1_params = {
@@ -84,12 +84,6 @@ class StackedBLSTMEmbedding(nn.Module):
             "dilation": 1
         }
 
-        self.pool3_params = {
-            "kernel_size": self.stride2,
-            "stride": self.stride2,
-            "padding": 0,
-            "dilation": 1
-        }
         
         # First BLSTM layer
         self.blstm1 = nn.LSTM(
@@ -107,17 +101,12 @@ class StackedBLSTMEmbedding(nn.Module):
             bidirectional=True
         )
 
-        self.lstm = nn.LSTM(
-            hidden_dim, hidden_dim//2,
-            num_layers = 2,
-            batch_first = True,
-            bidirectional = True
-        )
+        
         
         # Max pooling layers
         self.pool1 = nn.MaxPool1d(**self.pool1_params)
         self.pool2 = nn.MaxPool1d(**self.pool2_params)
-        self.pool3 = nn.MaxPool1d(**self.pool3_params)
+        
         
         # Final linear embedding and dropout
         self.linear_embed = nn.Linear(hidden_dim, output_dim)
@@ -167,7 +156,7 @@ class StackedBLSTMEmbedding(nn.Module):
             # print("Using XLA path without pack_padded_sequence") # Optional debug print
 
             # First BLSTM (runs on padded sequence)
-            output,_ = self.lstm(x)
+            output,_ = self.blstm1(x)
         
             output = output.transpose(1, 2) # (B, H, T)
             output = self.pool1(output)     # (B, H, T_new)
@@ -182,7 +171,7 @@ class StackedBLSTMEmbedding(nn.Module):
             # Apply mask: Zero out padded time steps before next LSTM
             output = output * mask1.unsqueeze(-1)
         
-            output, _ = self.blstm1(output) # (B, T, H)
+            output, _ = self.blstm2(output) # (B, T, H)
 
             # First max pooling
             output = output.transpose(1, 2) # (B, H, T)
@@ -199,21 +188,6 @@ class StackedBLSTMEmbedding(nn.Module):
             output = output * mask2.unsqueeze(-1)
 
             # Second BLSTM (runs on masked, potentially padded sequence from previous step)
-            output, _ = self.blstm2(output) # (B, T_new, H)
-
-            # Second max pooling
-            output = output.transpose(1, 2) # (B, H, T_new)
-            output = self.pool3(output)     # (B, H, T_new2)
-            output = output.transpose(1, 2) # (B, T_new2, H)
-            # Update lengths based on second pooling
-            x_len = self.calculate_pool_output_length(x_len, self.pool3_params)
-
-            # Create mask AFTER second pooling based on final lengths
-            max_len_3 = output.size(1) # Get final max length
-            # Create mask on the same device as output
-            mask3 = torch.arange(max_len_3, device=output.device)[None, :] < x_len[:, None] # (B, T_new2)
-            # Apply mask: Zero out padded time steps before final linear layer
-            output = output * mask3.unsqueeze(-1)
 
             # --- Common Operations ---
             # Final linear embedding and dropout
