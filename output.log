@@ -1,0 +1,72 @@
+
+🔧 Configuring Optimizer:
+├── Type: ADAMW
+├── Base LR: 0.0003
+├── Weight Decay: 1e-06
+├── Parameter Groups:
+│   ├── Group: self_attn
+│   │   ├── LR: 0.0002
+│   │   └── Patterns: []
+│   ├── Group: ffn
+│   │   ├── LR: 0.0002
+│   │   └── Patterns: []
+│   └── Default Group (unmatched parameters)
+└── AdamW Specific:
+    ├── Betas: [0.9, 0.999]
+    ├── Epsilon: 1e-08
+    └── AMSGrad: False
+
+📈 Configuring Learning Rate Scheduler:
+├── Type: COSINE_WARM
+├── Cosine Annealing Warm Restarts Settings:
+│   ├── T_0: 10 epochs (35680 steps)
+│   ├── T_mult: 10
+│   └── Min LR: 1e-07
+├── Warmup Settings:
+│   ├── Duration: 5 epochs (8920 steps)
+│   ├── Start Factor: 0.1
+│   └── End Factor: 1.0
+
+📈 Configuring Learning Rate Scheduler:
+├── Type: COSINE_WARM
+├── Cosine Annealing Warm Restarts Settings:
+│   ├── T_0: 10 epochs (35680 steps)
+│   ├── T_mult: 10
+│   └── Min LR: 1e-07
+├── Warmup Settings:
+│   ├── Duration: 5 epochs (8920 steps)
+│   ├── Start Factor: 0.1
+│   └── End Factor: 1.0
+Checkpoint loaded from epoch 27
+Successfully loaded: model, optimizer, scheduler, scaler, training_state
+[34m[1mwandb[0m: [33mWARNING[0m Saving files without folders. If you want to preserve subdirectories pass base_path to wandb.save, i.e. wandb.save("/mnt/folder/file.h5", base_path="/mnt")
+
+📊 Metrics (Epoch 27):
+├── TRAIN:
+│   ├── ce_loss: 1.8286
+│   ├── ctc_loss: 0.6919
+│   ├── joint_loss: 2.1746
+│   ├── perplexity_char: 1.4832
+│   └── perplexity_token: 6.2252
+└── VAL:
+    ├── cer: 9.9863
+    ├── wer: 19.2658
+    └── word_dist: 12.3559
+└── TRAINING:
+    └── learning_rate: 0.000002
+                                                                           =1/2, ce_loss=2.0945, ctc_loss=0.8724, joint_loss=2.5307, perplexity=8.1214] 
+
+📊 Metrics (Epoch 28):
+├── TRAIN:
+│   ├── ce_loss: 1.8247
+│   ├── ctc_loss: 0.6850
+│   ├── joint_loss: 2.1672
+│   ├── perplexity_char: 1.4819
+│   └── perplexity_token: 6.2009
+└── VAL:
+    ├── cer: 9.9516
+    ├── wer: 19.2309
+    └── word_dist: 12.3333
+└── TRAINING:
+    └── learning_rate: 0.000300
+Evaluating with test config
